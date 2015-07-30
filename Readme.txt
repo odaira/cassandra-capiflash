@@ -1,3 +1,6 @@
+This project is derived from Cassandra's commitlog implementation. Please see my posts in Cassandra blog.
+http://arlab093.austin.ibm.com/cassandra/?author=6
+
 This link might help importing into eclipse
 http://wiki.apache.org/cassandra/RunningCassandraInEclipse
 
