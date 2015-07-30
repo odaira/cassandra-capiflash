@@ -158,7 +158,7 @@ fi
 # Specifies the default port over which Cassandra will be available for
 # JMX connections.
 # For security reasons, you should not expose this port to the internet.  Firewall it if needed.
-JMX_PORT="7199"
+JMX_PORT="11199"
 
 
 # Here we create the arguments that will get passed to the jvm when
@@ -180,7 +180,7 @@ JVM_OPTS="$JVM_OPTS -XX:+UseThreadPriorities"
 # allows lowering thread priority without being root.  see
 # http://tech.stolsvik.com/2010/01/linux-java-thread-priorities-workaround.html
 JVM_OPTS="$JVM_OPTS -XX:ThreadPriorityPolicy=42"
-
+JVM_OPTS="$JVM_OPTS -Djava.library.path=/home/bsendir/lib/capiblock/build/jni"
 # min and max heap sizes should be set to the same value to avoid
 # stop-the-world GC pauses during resize, and so that we can lock the
 # heap in memory on startup to prevent any of it from being swapped
@@ -199,7 +199,7 @@ fi
 startswith() { [ "${1#$2}" != "$1" ]; }
 
 # Per-thread stack size.
-JVM_OPTS="$JVM_OPTS -Xss256k"
+JVM_OPTS="$JVM_OPTS -Xss328k"
 
 # Larger interned string table, for gossip's benefit (CASSANDRA-6410)
 JVM_OPTS="$JVM_OPTS -XX:StringTableSize=1000003"
@@ -279,3 +279,5 @@ else
 fi
 
 JVM_OPTS="$JVM_OPTS $JVM_EXTRA_OPTS"
+JVM_OPTS="$JVM_OPTS -Xms64G"
+JVM_OPTS="$JVM_OPTS -Xmx64G"
