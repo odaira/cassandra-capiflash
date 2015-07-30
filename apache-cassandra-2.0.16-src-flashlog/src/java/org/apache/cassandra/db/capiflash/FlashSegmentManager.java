@@ -1,3 +1,20 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package org.apache.cassandra.db.capiflash;
 
 import java.io.IOException;
@@ -9,12 +26,17 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 
+import org.apache.cassandra.db.RowMutation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.ibm.research.capiblock.Chunk;
 import com.ibm.research.capiblock.ObjectStreamBuffer;
 
+/**
+ * @author bsendir
+ *
+ */
 public class FlashSegmentManager {
 	static final Logger logger = LoggerFactory
 			.getLogger(FlashSegmentManager.class);
@@ -24,7 +46,7 @@ public class FlashSegmentManager {
 	private final BlockingQueue<Integer> freelist = new LinkedBlockingQueue<Integer>(
 			MAX_SEGMENTS);
 	private final ConcurrentLinkedQueue<FlashSegment> activeSegments = new ConcurrentLinkedQueue<FlashSegment>();
-	ByteBuffer util = ByteBuffer.allocateDirect(1024 * 4);
+	ByteBuffer util = ByteBuffer.allocateDirect(1024 * 4);//utility buffer for bookkeping purposes
 	HashMap<Integer, Long> unCommitted;
 	Chunk bookkeeper = null;
 	FlashSegment active;
@@ -32,13 +54,13 @@ public class FlashSegmentManager {
 	FlashSegmentManager(Chunk chunk) {
 		bookkeeper = chunk;
 		unCommitted = new HashMap<Integer, Long>();
-		try {
+		try {//There is only one instance of FSM
 			ByteBuffer recoverMe = ByteBuffer.allocateDirect(1024 * 4 * 128);
 			bookkeeper.readBlock(FlashCommitLog.START_OFFSET, 128, recoverMe);
 			for (int i = 0; i < MAX_SEGMENTS; i++) {
 				recoverMe.position(i * FlashCommitLog.BLOCK_SIZE);
 				long test = recoverMe.getLong();
-				if (test != 0) {
+				if (test != 0) {//Committed Segments will be 0 unCommitted Segments will contain the unique id
 					unCommitted.put(i, test);
 				}
 			}
@@ -53,29 +75,11 @@ public class FlashSegmentManager {
 				logger.debug(i + " will be replayed");
 			}
 		}
-		print();
 		activateNextSegment();
-	}
-
-	void print() {
-		// TODO Auto-generated method stub
-		util.clear();
-		for (long i = FlashCommitLog.START_OFFSET; i < FlashCommitLog.START_OFFSET + 128; i++) {
-			try {
-				bookkeeper.readBlock(i, 1, util);
-				// buf.flip();
-				System.out.println("Position: " + i + "Unique ID: "
-						+ util.getLong());
-				util.clear();
-			} catch (IOException e) {
-				e.printStackTrace();
-			}
-		}
 	}
 
 	private void activateNextSegment() {
 		try {
-			// TODO if activate takes longer forceFlush //TODO
 			active = new FlashSegment(freelist.take());
 			try {
 				ByteBuffer buf = ByteBuffer.allocateDirect(1024 * 4);
@@ -111,37 +115,33 @@ public class FlashSegmentManager {
 		return Collections.unmodifiableCollection(activeSegments);
 	}
 
-	synchronized FlashSegment ask(long num_blocks) {
+	synchronized FlashRecordKeeper allocate(long num_blocks, RowMutation rm) {
 		if (active == null || !active.hasCapacityFor(num_blocks)) {
-			util.clear();
-			util.putLong(0);
-			try {// TODO FIx
-				bookkeeper.writeBlock(FlashSegment.calculatePos(
-						active.currentBlocks.get(), active.getPB()), 1, util);
-			} catch (IOException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			}
+			//TODO Zero end of buffer or no ?
 			activateNextSegment();
 		}
-		return active;
+		active.markDirty(rm, active.getContext());
+		return new FlashRecordKeeper(num_blocks,
+				active.getandAddPosition(num_blocks), active.getID());
 	}
 
-	public synchronized void recycleAfterReplay() {
+	/**
+	 * Zero all bookkeeping segments
+	 */
+	public void recycleAfterReplay() {
 		for (Integer key : unCommitted.keySet()) {
 			try {
 				util.clear();
 				util.putLong(0);
 				bookkeeper.writeBlock(FlashCommitLog.START_OFFSET + key, 1,
 						util);
-				util.clear();
 				freelist.put(key);
 				logger.debug("activating key " + key);
 			} catch (IOException | InterruptedException e) {
 				e.printStackTrace();
 			}
-
 		}
+		unCommitted.clear();
 	}
 
 }

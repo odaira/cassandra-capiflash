@@ -903,7 +903,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                         // the log header with "you can discard anything written before the context" is not valid
                     	ReplayPosition x;
                     	x=ctx.get();
-                    	System.err.println(name+"----"+x);
+                    	System.err.println(name+"----"+x); // TODO Bedri edit for debugging
                         FlashCommitLog.instance.discardCompletedSegments(metadata.cfId,x);
                     }
                 }

@@ -1,3 +1,20 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package org.apache.cassandra.db.capiflash;
 
 import java.io.DataOutputStream;
@@ -17,18 +34,19 @@ import org.slf4j.LoggerFactory;
 
 import com.ibm.research.capiblock.Chunk;
 
+/**
+ * @author bsendir
+ * Re-Usable Callable used for writing to flash. 
+ */
 public class FlashWorker implements Callable {
 	static final Logger logger = LoggerFactory.getLogger(FlashWorker.class);
 	private final ByteBuffer buffer;
 	private final DataOutputStream bufferStream;
 	private Chunk ref = null;
-	
+
 	private final Checksum checksum = new PureJavaCrc32();
 	private RowMutation rm = null;
-	private long startBlock = 0;
-	private int totalSize = 0;
-	private long requiredBlocks = 0;
-	private long segmentID=0;
+	private FlashRecordKeeper info;
 
 	public FlashWorker(Chunk chunk, int nsegmentSizeinMB) {
 		buffer = ByteBuffer.allocateDirect(nsegmentSizeinMB * 1024 * 1024);
@@ -41,14 +59,14 @@ public class FlashWorker implements Callable {
 	public Callable call() {
 		try {
 			checksum.reset();
-			bufferStream.writeLong(segmentID);
-			bufferStream.writeInt(totalSize);
+			bufferStream.writeLong(info.getSegmentID());
+			bufferStream.writeInt(info.getTotalSize());
 			buffer.putLong(checksum.getValue());
-			//enable trace here
 			RowMutation.serializer.serialize(rm, bufferStream,
 					MessagingService.current_version);
 			buffer.putLong(checksum.getValue());
-			ref.writeBlock(startBlock, requiredBlocks, buffer);
+			ref.writeBlock(info.getStartBlock(), info.getRequiredBlocks(),
+					buffer);
 			buffer.clear();
 		} catch (IOException e) {
 			e.printStackTrace();
@@ -60,17 +78,8 @@ public class FlashWorker implements Callable {
 		this.rm = rm;
 	}
 
-	public void setSize(int totalSize, long requiredBlocks) {
-		this.totalSize = totalSize;
-		this.requiredBlocks = requiredBlocks;
-	}
-
-	public void setStartBlock(long startBlock) {
-		this.startBlock = startBlock;
-	}
-
-	public void setSegmentID(long id) {
-		this.segmentID=id;		
+	public void setOffset(FlashRecordKeeper adder) {
+		info = adder;
 	}
 
 }
