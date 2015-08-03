@@ -83,7 +83,7 @@ public class FlashBulkReplayer {
 	public FlashBulkReplayer() {
 		this.keyspacesRecovered = new NonBlockingHashSet<Keyspace>();
 		this.futures = new ArrayList<Future<?>>();
-		buffer = ByteBuffer.allocateDirect(128 * 1024 * 1024);
+		buffer = ByteBuffer.allocateDirect(32000*4096);
 		this.invalidMutations = new HashMap<UUID, AtomicInteger>();
 		this.replayedCount = new AtomicInteger();
 		this.checksum = new PureJavaCrc32();
