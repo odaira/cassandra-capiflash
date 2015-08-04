@@ -80,7 +80,9 @@ public class FlashCommitLog {
 		// fake them into completion
 		// service
 		Chunk chunkl = dev.openChunk(DEVICES[i % 2]);
-		queue.add(new FlashWorker(chunkl,bufferSizeinMB));
+		queue.add(Futures.immediateFuture(new FlashWorker(chunkl,
+								  bufferSizeinMB)));// TODO might want to replace this
+		// with JAVA8 Completedfuture
 	    }
 	} catch (IOException e1) {
 	    e1.printStackTrace();
