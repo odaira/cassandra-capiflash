@@ -111,7 +111,6 @@ public class FlashCommitLog {
 			// bottleneck
 			adder.setSize((int) totalSize);
 			r.setOffset(adder);
-			exec.submit(r);
 			queue.add((FlashWorker) exec.submit(r).get());// wait for completion
 		} catch (InterruptedException | ExecutionException e) {
 			e.printStackTrace();

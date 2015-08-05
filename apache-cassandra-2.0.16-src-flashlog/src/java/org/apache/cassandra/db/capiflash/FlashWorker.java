@@ -65,6 +65,7 @@ public class FlashWorker implements Callable {
 			RowMutation.serializer.serialize(rm, bufferStream,
 					MessagingService.current_version);
 			buffer.putLong(checksum.getValue());
+			//logger.debug("Writing to "+info.getStartBlock()+"-->"+info.getRequiredBlocks());
 			ref.writeBlock(info.getStartBlock(), info.getRequiredBlocks(),
 					buffer);
 			buffer.clear();

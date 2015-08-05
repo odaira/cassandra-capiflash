@@ -88,7 +88,7 @@ public class FlashSegmentManager {
 
 	private void activateNextSegment() {
 		if(freelist.size()<MAX_SEGMENTS*EMERGENCY_VALVE){
-			logger.debug("Emergency valve in action flushing oldest....");
+			logger.debug("!!!!!!!----------!!!!!!!!!!--------!!!!!!!Emergency valve in action flushing oldest....");
 			flushOldestKeyspaces();
 		}
 		try {

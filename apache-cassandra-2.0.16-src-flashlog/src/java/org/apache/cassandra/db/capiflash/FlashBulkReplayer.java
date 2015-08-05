@@ -161,8 +161,9 @@ public class FlashBulkReplayer {
 				checksum.reset();
 				int mark = buffer.position();
 				long recordSegmentId = buffer.getLong();
+				
 				if (recordSegmentId != segmentId) {
-					logger.debug("Unidentified segment!! at" + mark); 
+					logger.debug("1st:"+recordSegmentId+"-- "+segmentId+"Unidentified segment!! at" + mark); 
 					break;
 				}
 				serializedSize = buffer.getInt();
@@ -195,7 +196,7 @@ public class FlashBulkReplayer {
 				checksum.update(data, 0, serializedSize - 28);
 
 				if (claimedCRC32 != checksum.getValue()) {
-					logger.debug("Error!! Second Checksum Doesnot Match !!");
+					logger.debug("Error!! Second Checksum Doesnot Match !!"+claimedCRC32+"   "+checksum.getValue());
 					break;// TODO we check the record anyway, maybe continue
 							// instead of break
 				}
