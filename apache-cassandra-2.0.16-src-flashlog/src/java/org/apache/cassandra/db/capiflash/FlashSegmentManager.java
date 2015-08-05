@@ -22,11 +22,19 @@ import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 
+import org.apache.cassandra.config.Schema;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.RowMutation;
+import org.apache.cassandra.db.commitlog.CommitLog;
+import org.apache.cassandra.db.commitlog.CommitLogSegment;
+import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.Pair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -42,7 +50,7 @@ public class FlashSegmentManager {
 			.getLogger(FlashSegmentManager.class);
 	public static int MAX_SEGMENTS = 128;
 	public static int BLOCKS_IN_SEG = 32000;
-
+	public static double EMERGENCY_VALVE = 0.1; //
 	private final BlockingQueue<Integer> freelist = new LinkedBlockingQueue<Integer>(
 			MAX_SEGMENTS);
 	private final ConcurrentLinkedQueue<FlashSegment> activeSegments = new ConcurrentLinkedQueue<FlashSegment>();
@@ -79,6 +87,10 @@ public class FlashSegmentManager {
 	}
 
 	private void activateNextSegment() {
+		if(freelist.size()<MAX_SEGMENTS*EMERGENCY_VALVE){
+			logger.debug("Emergency valve in action flushing oldest....");
+			flushOldestKeyspaces();
+		}
 		try {
 			active = new FlashSegment(freelist.take());
 			try {
@@ -96,6 +108,44 @@ public class FlashSegmentManager {
 		} catch (InterruptedException e) {
 			e.printStackTrace();
 		}
+	}
+
+	private void flushOldestKeyspaces() {
+	    {
+	        FlashSegment oldestSegment = activeSegments.peek();
+
+	        if (oldestSegment != null && oldestSegment != this.active)
+	        {
+	            for (UUID dirtyCFId : oldestSegment.getDirtyCFIDs())
+	            {
+	                Pair<String,String> pair = Schema.instance.getCF(dirtyCFId);
+	                if (pair == null)
+	                {
+	                    // even though we remove the schema entry before a final flush when dropping a CF,
+	                    // it's still possible for a writer to race and finish his append after the flush.
+	                    logger.debug("Marking clean CF {} that doesn't exist anymore", dirtyCFId);
+	                    oldestSegment.markClean(dirtyCFId, oldestSegment.getContext());
+	                }
+	                else
+	                {
+	                    String keypace = pair.left;
+	                    final ColumnFamilyStore cfs = Keyspace.open(keypace).getColumnFamilyStore(dirtyCFId);
+	                    // flush shouldn't run on the commitlog executor, since it acquires Table.switchLock,
+	                    // which may already be held by a thread waiting for the CL executor (via getContext),
+	                    // causing deadlock
+	                    Runnable runnable = new Runnable()
+	                    {
+	                        public void run()
+	                        {
+	                            cfs.forceFlush();
+	                        }
+	                    };
+	                    StorageService.optionalTasks.execute(runnable);
+	                }
+	            }
+	        }
+	    }
+		
 	}
 
 	synchronized void recycleSegment(final FlashSegment segment) {
