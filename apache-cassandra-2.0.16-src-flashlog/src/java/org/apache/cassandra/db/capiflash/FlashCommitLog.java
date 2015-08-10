@@ -18,8 +18,14 @@
 package org.apache.cassandra.db.capiflash;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.Iterator;
+import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.Vector;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorCompletionService;
@@ -29,12 +35,15 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.RowMutation;
 import org.apache.cassandra.db.commitlog.ReplayPosition;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.utils.FBUtilities;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.Futures;
 import com.ibm.research.capiblock.CapiBlockDevice;
 import com.ibm.research.capiblock.Chunk;
@@ -46,44 +55,34 @@ import com.ibm.research.capiblock.Chunk;
 public class FlashCommitLog {
 	// TUNABLES
 	static int BLOCK_SIZE = 4096;
-	static long START_OFFSET = 300000000L; // Bookkeeping starts here
+	static long START_OFFSET = 20000000L; // Bookkeeping starts here
 	static long DATA_OFFSET = START_OFFSET + FlashSegmentManager.MAX_SEGMENTS; // Commitlog
 	// starts
 	// here
-	static String[] DEVICES = { "/dev/sg7", "/dev/sg9" };
-	final int flashThreads = 128; // Number of workers to add on commitlog each
+	static String[] DEVICES = { "/dev/sg9", "/dev/sg12" };//
+	final int flashThreads = 64; // Number of workers to add on commitlog each
 	// worker serialize&writeblock
 	final int bufferSizeinMB = 1; // Size of Directly allocated buffer in
 	// workers
+	// Set futures;// TODO FIXIT
 
 	static final Logger logger = LoggerFactory.getLogger(FlashCommitLog.class);
 	public static final FlashCommitLog instance = new FlashCommitLog();
 
 	final CapiBlockDevice dev = CapiBlockDevice.getInstance();
-	/*
-	 * final BlockingQueue<Future<FlashWorker>> queue = new
-	 * LinkedBlockingQueue<Future<FlashWorker>>( flashThreads);// Queue to reuse
-	 * callables
-	 */
 	final BlockingQueue<FlashWorker> queue = new LinkedBlockingQueue<FlashWorker>(
 			flashThreads);
 	final ThreadPoolExecutor exec = (ThreadPoolExecutor) Executors
 			.newFixedThreadPool(flashThreads);
-	/*
-	 * final ExecutorCompletionService<FlashWorker> completionService = new
-	 * ExecutorCompletionService<FlashWorker>( exec, queue);
-	 */
+
 	protected volatile FlashSegmentManager fsm;
 
 	private FlashCommitLog() {
 		try {
 			Chunk chunk = dev.openChunk(DEVICES[0]);
 			fsm = new FlashSegmentManager(chunk);
-			// TODO not sure if this pattern is correct. Is it misusing
-			// completionHandler?
-			for (int i = 0; i < flashThreads; i++) {// Pre allocate workers and
-				// fake them into completion
-				// service
+			for (int i = 0; i < flashThreads; i++) {
+				// Pre allocate workers
 				Chunk chunkl = dev.openChunk(DEVICES[i % 2]);
 				queue.add(new FlashWorker(chunkl, bufferSizeinMB));
 			}
@@ -107,14 +106,21 @@ public class FlashCommitLog {
 					MessagingService.current_version) + 28;
 			long requiredBlocks = getBlockCount(totalSize);
 			FlashRecordKeeper adder = fsm.allocate(requiredBlocks, rm);// TODO
-			// Synchronization
-			// bottleneck
+																		// Synchronization
+																		// bottleneck
 			adder.setSize((int) totalSize);
 			r.setOffset(adder);
-			queue.add((FlashWorker) exec.submit(r).get());// wait for completion
+			queue.add((FlashWorker) exec.submit(r).get());// wait to finish
+			synchronized (queue) {
+				if (queue.size() == flashThreads) {
+					queue.notify();
+				}
+			}
+
 		} catch (InterruptedException | ExecutionException e) {
 			e.printStackTrace();
 		}
+
 	}
 
 	/**
@@ -131,15 +137,22 @@ public class FlashCommitLog {
 	public void discardCompletedSegments(UUID cfId, final ReplayPosition context) {
 		// Keyspace has a static ReEntrantLock. It writeLocks globally.
 		// So we only need to wait for writetoFlash to finish
-		// TODO Find elegant way to achieve this to avoid polling
-		while (queue.size() != flashThreads) {
-			try {
-				Thread.sleep(50);
-			} catch (InterruptedException e) {
-				e.printStackTrace();
+		synchronized (queue) {
+			if (queue.size() != flashThreads) {
+				try {
+					logger.debug("Waiting on futures");
+					queue.wait();
+					logger.debug("Done on futures");
+				} catch (InterruptedException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
 			}
 		}
-
+		/*
+		 * while (queue.size() != flashThreads) { try { Thread.sleep(50); }
+		 * catch (InterruptedException e) { e.printStackTrace(); } }
+		 */
 		// Go thru the active segment files, which are ordered oldest to
 		// newest, marking the
 		// flushed CF as clean, until we reach the segment file
@@ -213,10 +226,20 @@ public class FlashCommitLog {
 	 *         writeLocks before calling this. Not sure if I need sync
 	 */
 	public Future<ReplayPosition> getContext() {
-		synchronized (fsm.active) {// TODO return accurate context on memtable
-									// not sure if I need this there
-			return Futures.immediateFuture(fsm.active.getContext());
+		synchronized (queue) {
+			if (queue.size() != flashThreads) {
+				try {
+					logger.debug("Waiting on futures");
+					queue.wait();
+					logger.debug("Done on futures");
+				} catch (InterruptedException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+			}
 		}
+		return Futures.immediateFuture(fsm.active.getContext());
+
 	}
 
 	/**

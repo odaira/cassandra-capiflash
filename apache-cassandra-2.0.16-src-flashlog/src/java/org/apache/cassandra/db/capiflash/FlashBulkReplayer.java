@@ -83,7 +83,7 @@ public class FlashBulkReplayer {
 	public FlashBulkReplayer() {
 		this.keyspacesRecovered = new NonBlockingHashSet<Keyspace>();
 		this.futures = new ArrayList<Future<?>>();
-		buffer = ByteBuffer.allocateDirect(32000*4096);
+		buffer = ByteBuffer.allocateDirect(FlashSegmentManager.BLOCKS_IN_SEG*4096);
 		this.invalidMutations = new HashMap<UUID, AtomicInteger>();
 		this.replayedCount = new AtomicInteger();
 		this.checksum = new PureJavaCrc32();
@@ -132,7 +132,6 @@ public class FlashBulkReplayer {
 			logger.debug(segmentId + " Replaying " + key + " starting at "
 					+ replayPosition);
 			// get the start position
-			long startPosition = replayPosition;
 			long claimedCRC32;
 			int serializedSize;
 
@@ -144,6 +143,7 @@ public class FlashBulkReplayer {
 					* FlashSegmentManager.BLOCKS_IN_SEG)
 					+ replayPosition;
 			long blocks = 0;
+			//TODO read 128 mb
 			while (blocks != FlashSegmentManager.BLOCKS_IN_SEG) {
 				ByteBuffer temp = ByteBuffer
 						.allocateDirect((int) (BULK_BLOCKS_TO_READ * 1024 * 4));

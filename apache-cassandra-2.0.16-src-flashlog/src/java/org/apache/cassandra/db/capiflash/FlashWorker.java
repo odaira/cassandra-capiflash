@@ -47,7 +47,7 @@ public class FlashWorker implements Callable {
 	private final Checksum checksum = new PureJavaCrc32();
 	private RowMutation rm = null;
 	private FlashRecordKeeper info;
-
+	
 	public FlashWorker(Chunk chunk, int nsegmentSizeinMB) {
 		buffer = ByteBuffer.allocateDirect(nsegmentSizeinMB * 1024 * 1024);
 		bufferStream = new DataOutputStream(new ChecksummedOutputStream(

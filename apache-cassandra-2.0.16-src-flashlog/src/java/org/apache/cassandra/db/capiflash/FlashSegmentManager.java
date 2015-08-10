@@ -63,13 +63,13 @@ public class FlashSegmentManager {
 		bookkeeper = chunk;
 		unCommitted = new HashMap<Integer, Long>();
 		try {//There is only one instance of FSM
-			ByteBuffer recoverMe = ByteBuffer.allocateDirect(1024 * 4 * 128);
-			bookkeeper.readBlock(FlashCommitLog.START_OFFSET, 128, recoverMe);
+			ByteBuffer recoverMe = ByteBuffer.allocateDirect(1024 * 4 * MAX_SEGMENTS);
+			bookkeeper.readBlock(FlashCommitLog.START_OFFSET, MAX_SEGMENTS, recoverMe);
 			for (int i = 0; i < MAX_SEGMENTS; i++) {
 				recoverMe.position(i * FlashCommitLog.BLOCK_SIZE);
-				long test = recoverMe.getLong();
-				if (test != 0) {//Committed Segments will be 0 unCommitted Segments will contain the unique id
-					unCommitted.put(i, test);
+				long segID = recoverMe.getLong();
+				if (segID != 0) {//Committed Segments will be 0 unCommitted Segments will contain the unique id
+					unCommitted.put(i, segID);
 				}
 			}
 		} catch (IOException e) {
