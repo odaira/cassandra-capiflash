@@ -24,15 +24,17 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.Uninterruptibles;
+
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
@@ -47,7 +49,7 @@ import org.apache.cassandra.utils.FBUtilities;
  * Commit Log tracks every write operation into the system. The aim of the commit log is to be able to
  * successfully recover data that was not stored to disk via the Memtable.
  */
-public class CommitLog implements CommitLogMBean {
+public class CommitLog implements CommitLogMBean, ICommitLog {
 	private static final Logger logger = LoggerFactory
 			.getLogger(CommitLog.class);
 
@@ -68,7 +70,7 @@ public class CommitLog implements CommitLogMBean {
 
 	private final CommitLogMetrics metrics;
 
-	private CommitLog() {
+	protected CommitLog() {
 		DatabaseDescriptor.createAllDirectories();
 
 		allocator = new CommitLogAllocator();
@@ -103,7 +105,7 @@ public class CommitLog implements CommitLogMBean {
 	 *
 	 * @return the number of mutations replayed
 	 */
-	public int recover() throws IOException {
+	public int recover() {
 		FilenameFilter unmanagedFilesFilter = new FilenameFilter() {
 			public boolean accept(File dir, String name) {
 				// we used to try to avoid instantiating commitlog (thus
@@ -113,7 +115,7 @@ public class CommitLog implements CommitLogMBean {
 				// ahead and allow writes before recover(), and just skip active
 				// segments when we do.
 				return CommitLogDescriptor.isValid(name)
-						&& !instance.allocator.manages(name);
+						&& !allocator.manages(name);
 			}
 		};
 
@@ -137,12 +139,17 @@ public class CommitLog implements CommitLogMBean {
 			Arrays.sort(files,
 					new CommitLogSegment.CommitLogSegmentFileComparator());
 			logger.info("Replaying " + StringUtils.join(files, ", "));
-			replayed = recover(files);
+			try {
+				replayed = recover(files);
+			} catch (IOException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
 			logger.info("Log replay complete, " + replayed
 					+ " replayed mutations");
 
 			for (File f : files)
-				CommitLog.instance.allocator.recycleSegment(f);
+				this.allocator.recycleSegment(f);
 		}
 
 		allocator.enableReserveSegmentCreation();

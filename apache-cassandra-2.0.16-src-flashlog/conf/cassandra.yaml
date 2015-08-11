@@ -192,6 +192,37 @@ row_cache_save_period: 0
 # saved caches
 saved_caches_directory: /home/bsendir/temp/cassandra/saved_caches
 
+#CommitLog-FlashCommitLog
+#Type CommitLog or FlashCommitLog
+commitlog_type: FlashCommitLog
+
+#FlashCommitLog Settings
+flashlog_devices:
+    - /dev/sg7
+    - /dev/sg9
+    
+#Start offset on physical LUN
+flashlog_start_offset: 30000000
+
+#Number of worker threads serializing and making synchronous calls to capi device
+flashlog_threads: 64
+
+#number of logical segments
+flashlog_number_of_segments: 128
+
+#records for each segment
+flashlog_segments_size_in_blocks: 32000
+
+#size of the buffer allocated in each worker thread. this also checks max request size
+flashlog_threads_buffer_size_in_mb: 1
+
+#emergency valve for flushing old commitlog segments. Flashcommitlog triggers flush when there is less than 0.2 segments left on flash
+flashlog_emergency_valve: 0.2
+
+
+
+
+
 # commitlog_sync may be either "periodic" or "batch." 
 # When in batch mode, Cassandra won't ack writes until the commit log
 # has been fsynced to disk.  It will wait up to
@@ -715,3 +746,5 @@ inter_dc_tcp_nodelay: false
 # for sequential access. Note: This could be harmful for fat rows, see CASSANDRA-4937
 # for further details on that topic.
 preheat_kernel_page_cache: false
+
+

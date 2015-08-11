@@ -37,8 +37,9 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Memtable;
 import org.apache.cassandra.db.RowIndexEntry;
-import org.apache.cassandra.db.capiflash.FlashCommitLog;
 import org.apache.cassandra.db.commitlog.CommitLog;
+import org.apache.cassandra.db.commitlog.CommitLogHelper;
+import org.apache.cassandra.db.commitlog.FlashCommitLog;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.CacheService;
@@ -79,7 +80,7 @@ public class StatusLogger
         logger.info(String.format("%-25s%10s%10s",
                                   "CompactionManager", CompactionManager.instance.getActiveCompactions(), CompactionManager.instance.getPendingTasks()));
         logger.info(String.format("%-25s%10s%10s",
-                                  "Commitlog", "n/a", FlashCommitLog.instance.getPendingTasks()));
+                                  "Commitlog", "n/a", CommitLogHelper.instance.getPendingTasks()));
         int pendingCommands = 0;
         for (int n : MessagingService.instance().getCommandPendingTasks().values())
         {

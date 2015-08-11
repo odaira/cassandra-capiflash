@@ -61,8 +61,9 @@ import org.apache.cassandra.config.CFMetaData.SpeculativeRetry;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
-import org.apache.cassandra.db.capiflash.FlashCommitLog;
 import org.apache.cassandra.db.columniterator.OnDiskAtomIterator;
+import org.apache.cassandra.db.commitlog.CommitLogHelper;
+import org.apache.cassandra.db.commitlog.FlashCommitLog;
 import org.apache.cassandra.db.commitlog.ReplayPosition;
 import org.apache.cassandra.db.compaction.AbstractCompactionStrategy;
 import org.apache.cassandra.db.compaction.CompactionManager;
@@ -842,8 +843,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         Keyspace.switchLock.writeLock().lock();
         try
         {
-            final Future<ReplayPosition> ctx = writeCommitLog ? FlashCommitLog.instance.getContext() : Futures.immediateFuture(ReplayPosition.NONE);
-           // System.err.println(ctx);
+            final Future<ReplayPosition> ctx = writeCommitLog ? CommitLogHelper.instance.getContext() : Futures.immediateFuture(ReplayPosition.NONE);
             // submit the memtable for any indexed sub-cfses, and our own.
             final List<ColumnFamilyStore> icc = new ArrayList<ColumnFamilyStore>();
             // don't assume that this.memtable is dirty; forceFlush can bring us here during index build even if it is not
@@ -901,10 +901,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                     {
                         // if we're not writing to the commit log, we are replaying the log, so marking
                         // the log header with "you can discard anything written before the context" is not valid
-                    	ReplayPosition x;
-                    	x=ctx.get();
-                    	System.err.println(name+"----"+x); // TODO Bedri edit for debugging
-                        FlashCommitLog.instance.discardCompletedSegments(metadata.cfId,x);
+                        CommitLogHelper.instance.discardCompletedSegments(metadata.cfId,ctx.get());
                     }
                 }
             });

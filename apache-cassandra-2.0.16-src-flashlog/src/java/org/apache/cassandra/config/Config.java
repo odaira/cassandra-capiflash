@@ -140,6 +140,7 @@ public class Config
     public String saved_caches_directory;
 
     // Commit Log
+    public CommitLogType commitlog_type;
     public String commitlog_directory;
     public Integer commitlog_total_space_in_mb;
     public CommitLogSync commitlog_sync;
@@ -147,6 +148,16 @@ public class Config
     public Integer commitlog_sync_period_in_ms;
     public int commitlog_segment_size_in_mb = 32;
     public int commitlog_periodic_queue_size = 1024 * FBUtilities.getAvailableProcessors();
+
+    
+    //Flash CommitLog
+    public long flashlog_start_offset;
+    public String[] flashlog_devices;
+    public int flashlog_threads;
+    public int flashlog_number_of_segments;
+    public int flashlog_segments_size_in_blocks;
+    public int flashlog_threads_buffer_size_in_mb;
+    public Double flashlog_emergency_valve;
 
     public String endpoint_snitch;
     public Boolean dynamic_snitch = true;
@@ -258,11 +269,19 @@ public class Config
         return csvListReader.read();
     }
 
+    public static enum CommitLogType
+    {
+        CommitLog,
+        FlashCommitLog
+    }
+   
+    
     public static enum CommitLogSync
     {
         periodic,
         batch
     }
+    
     public static enum InternodeCompression
     {
         all, none, dc

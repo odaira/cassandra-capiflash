@@ -15,7 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.db.capiflash;
+package org.apache.cassandra.db.commitlog;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -27,12 +27,11 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.RowMutation;
-import org.apache.cassandra.db.commitlog.CommitLog;
-import org.apache.cassandra.db.commitlog.CommitLogSegment;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.Pair;
 import org.slf4j.Logger;
@@ -48,9 +47,9 @@ import com.ibm.research.capiblock.ObjectStreamBuffer;
 public class FlashSegmentManager {
 	static final Logger logger = LoggerFactory
 			.getLogger(FlashSegmentManager.class);
-	public static int MAX_SEGMENTS = 128;
-	public static int BLOCKS_IN_SEG = 32000;
-	public static double EMERGENCY_VALVE = 0.1; //
+	public static int MAX_SEGMENTS = DatabaseDescriptor.getFlashCommitLogNumberOfSegments();
+	public static int BLOCKS_IN_SEG = DatabaseDescriptor.getFlashCommitLogSegmentSizeInBlocks();
+	public static double EMERGENCY_VALVE = DatabaseDescriptor.getFlashCommitLogEmergencyValve(); 
 	private final BlockingQueue<Integer> freelist = new LinkedBlockingQueue<Integer>(
 			MAX_SEGMENTS);
 	private final ConcurrentLinkedQueue<FlashSegment> activeSegments = new ConcurrentLinkedQueue<FlashSegment>();

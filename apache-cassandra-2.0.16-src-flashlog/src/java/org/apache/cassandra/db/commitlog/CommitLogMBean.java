@@ -81,7 +81,6 @@ public interface CommitLogMBean
     public void recover(String path) throws IOException;
 
     /**
-     * @return file names (not full paths) of active commit log segments (segments containing unflushed data)
      */
     public List<String> getActiveSegmentNames();
     

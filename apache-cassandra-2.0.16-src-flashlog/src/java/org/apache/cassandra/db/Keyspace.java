@@ -31,8 +31,9 @@ import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.apache.cassandra.config.*;
-import org.apache.cassandra.db.capiflash.FlashCommitLog;
 import org.apache.cassandra.db.commitlog.CommitLog;
+import org.apache.cassandra.db.commitlog.CommitLogHelper;
+import org.apache.cassandra.db.commitlog.FlashCommitLog;
 import org.apache.cassandra.db.filter.QueryFilter;
 import org.apache.cassandra.db.index.SecondaryIndex;
 import org.apache.cassandra.db.index.SecondaryIndexManager;
@@ -355,7 +356,7 @@ public class Keyspace
             if (writeCommitLog)
             {
                 Tracing.trace("Appending to commitlog");
-                FlashCommitLog.instance.add(mutation);
+                CommitLogHelper.instance.add(mutation);
             }
 
             DecoratedKey key = StorageService.getPartitioner().decorateKey(mutation.key());

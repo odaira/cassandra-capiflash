@@ -61,8 +61,9 @@ import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.MeteredFlusher;
 import org.apache.cassandra.db.SystemKeyspace;
-import org.apache.cassandra.db.capiflash.FlashCommitLog;
 import org.apache.cassandra.db.commitlog.CommitLog;
+import org.apache.cassandra.db.commitlog.CommitLogHelper;
+import org.apache.cassandra.db.commitlog.FlashCommitLog;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.LeveledManifest;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -389,7 +390,7 @@ public class CassandraDaemon
         // Start it before commit log, so memtables can flush during commit log replay
         MeteredFlusher.instance.start();
 
-        FlashCommitLog.instance.recover();
+        CommitLogHelper.instance.recover();
 
         // enable auto compaction
         for (Keyspace keyspace : Keyspace.all())
