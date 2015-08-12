@@ -60,7 +60,7 @@ import com.ibm.research.capiblock.Chunk;
  *
  */
 public class FlashBulkReplayer {
-	private static int BULK_BLOCKS_TO_READ=FlashSegmentManager.BLOCKS_IN_SEG/4;//32 MB pieces
+	private static int BULK_BLOCKS_TO_READ=8000;//32 MB pieces
 	static final Logger logger = LoggerFactory
 			.getLogger(FlashBulkReplayer.class);
 	private static final int MAX_OUTSTANDING_REPLAY_COUNT = 1024 * 1024; // this
@@ -76,7 +76,9 @@ public class FlashBulkReplayer {
 	private final ReplayPosition globalPosition;
 	private final Checksum checksum;
 	private ByteBuffer buffer;
-
+	private ByteBuffer readerBuffer;
+	
+	
 	public FlashBulkReplayer() {
 		this.keyspacesRecovered = new NonBlockingHashSet<Keyspace>();
 		this.futures = new ArrayList<Future<?>>();
@@ -110,6 +112,12 @@ public class FlashBulkReplayer {
 		globalPosition = replayPositionOrdering.min(cfPositions.values());
 		logger.debug("Global replay position is {} from columnfamilies {}"
 				+ globalPosition + "--- " + FBUtilities.toString(cfPositions));
+		
+		
+		
+		//allocate reader blocks
+		readerBuffer=ByteBuffer
+		.allocateDirect((int) (BULK_BLOCKS_TO_READ * 1024 * 4));
 	}
 
 	public void recover(FlashSegmentManager fsm) throws IOException {
@@ -124,7 +132,7 @@ public class FlashBulkReplayer {
 				replayPosition = globalPosition.position;
 			} else {
 				logger.debug("skipping replay of fully-flushed {}", key);
-				return;
+				continue;
 			}
 			logger.debug(segmentId + " Replaying " + key + " starting at "
 					+ replayPosition);
@@ -142,14 +150,13 @@ public class FlashBulkReplayer {
 			long blocks = 0;
 			//TODO read 128 mb
 			while (blocks != FlashSegmentManager.BLOCKS_IN_SEG) {
-				ByteBuffer temp = ByteBuffer
-						.allocateDirect((int) (BULK_BLOCKS_TO_READ * 1024 * 4));
+				readerBuffer.clear();
 				logger.debug("Reading " + start + " end:" + blocks);
 				ch.readBlock((FlashCommitLog.DATA_OFFSET + key
 						* FlashSegmentManager.BLOCKS_IN_SEG)
-						+ blocks, BULK_BLOCKS_TO_READ, temp);
+						+ blocks, BULK_BLOCKS_TO_READ, readerBuffer);
 				blocks += BULK_BLOCKS_TO_READ;
-				buffer.put(temp);
+				buffer.put(readerBuffer);
 			}
 			buffer.rewind();
 			buffer.position(replayPosition);

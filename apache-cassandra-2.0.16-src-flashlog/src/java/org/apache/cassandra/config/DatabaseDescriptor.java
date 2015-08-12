@@ -27,6 +27,7 @@ import java.util.*;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.primitives.Longs;
+import com.ibm.research.capiblock.CapiBlockDevice;
 
 import org.apache.cassandra.thrift.ThriftServer;
 import org.slf4j.Logger;
@@ -186,7 +187,18 @@ public class DatabaseDescriptor {
 					|| conf.flashlog_threads <= 0) {
 				throw new ConfigurationException(
 						"Please check all needed FlashLog Parameters");
-
+			}
+			if(conf.flashlog_segments_size_in_blocks*4096>=Integer.MAX_VALUE){
+				throw new ConfigurationException(
+						"Number of blocks can not be bigger than INTEGER.MAX_VALUE");
+			}
+			for(String dev : conf.flashlog_devices ){
+				try {
+					CapiBlockDevice.getInstance().openChunk(dev).close();
+				} catch (IOException e) {
+					throw new ConfigurationException(
+							"Check CAPI PATHS! Invalid Device Paths!!!");
+				}
 			}
 
 		} else {

@@ -82,5 +82,12 @@ public class FlashWorker implements Callable {
 	public void setOffset(FlashRecordKeeper adder) {
 		info = adder;
 	}
+	public void closeChunk(){
+		try {
+			ref.close();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+	}
 
 }

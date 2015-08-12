@@ -146,7 +146,11 @@ public class FlashCommitLog implements ICommitLog {
 		synchronized (queue) {
 			if (queue.size() != flashThreads) {
 				try {
+					long startTime = System.currentTimeMillis();
 					queue.wait();
+					long estimatedTime = System.currentTimeMillis() - startTime;
+					logger.debug("------------------------>" + " Wait miliseconds " + estimatedTime);
+					
 				} catch (InterruptedException e) {
 					e.printStackTrace();
 				}
@@ -216,6 +220,16 @@ public class FlashCommitLog implements ICommitLog {
 		exec.shutdown();
 		try {
 			exec.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
+			Iterator<FlashWorker> it = queue.iterator();
+			while(it.hasNext()){
+			     it.next().closeChunk();
+			 }
+			try {
+				fsm.bookkeeper.close();
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+			
 		} catch (InterruptedException e) {
 			e.printStackTrace();
 		}
