@@ -1,0 +1,12 @@
+Utility program to keep track of bookkeeping records.
+set paths in compile.sh and commitlog-util.sh
+
+to compile:
+./compile
+
+to run:
+./commitlog-util.sh {OPTION}
+-d
+	- Clears all commitlog book-keeping segments
+-r
+	- Reads commitlog book-keeping segments and reports back the segments that are not '0'
