@@ -147,7 +147,9 @@ public class DatabaseDescriptor {
 		logger.info("Commit log directory: " + conf.commitlog_directory);
 		// Flash Commitlog Configuration
 		if (conf.commitlog_type == null) {
-		} else if (conf.commitlog_type == Config.CommitLogType.CommitLog) {
+			conf.commitlog_type = Config.CommitLogType.CommitLog;
+		}
+		if (conf.commitlog_type == Config.CommitLogType.CommitLog) {
 			if (conf.commitlog_sync == null) {
 				throw new ConfigurationException(
 						"Missing required directive CommitLogSync");
