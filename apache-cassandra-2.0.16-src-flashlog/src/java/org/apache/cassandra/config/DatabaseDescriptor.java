@@ -179,22 +179,22 @@ public class DatabaseDescriptor {
 			if (conf.commitlog_total_space_in_mb == null)
 				conf.commitlog_total_space_in_mb = hasLargeAddressSpace() ? 1024
 						: 32;
-		} else if (conf.commitlog_type == Config.CommitLogType.FlashCommitLog) {
-			// Flash Commitlog Parameter Check
+		} else if (conf.commitlog_type == Config.CommitLogType.CAPIFlashCommitLog) {
+			// CAPI Flash Commitlog Parameter Check
 			System.err.println("FlashCommitLog in use");
-			if (conf.flashlog_devices == null || conf.flashlog_devices == null
-					|| conf.flashlog_number_of_segments < 32
-					|| conf.flashlog_segments_size_in_blocks < 16000
-					|| conf.flashlog_start_offset < 0
-					|| conf.flashlog_threads <= 0) {
+			if (conf.capiflashlog_devices == null || conf.capiflashlog_devices == null
+					|| conf.capiflashlog_number_of_segments < 32
+					|| conf.capiflashlog_segments_size_in_blocks < 16000
+					|| conf.capiflashlog_start_offset < 0
+					|| conf.capiflashlog_threads <= 0) {
 				throw new ConfigurationException(
 						"Please check all needed FlashLog Parameters");
 			}
-			if(conf.flashlog_segments_size_in_blocks*4096>=Integer.MAX_VALUE){
+			if(conf.capiflashlog_segments_size_in_blocks*4096>=Integer.MAX_VALUE){
 				throw new ConfigurationException(
 						"Number of blocks can not be bigger than INTEGER.MAX_VALUE");
 			}
-			for(String dev : conf.flashlog_devices ){
+			for(String dev : conf.capiflashlog_devices ){
 				try {
 					CapiBlockDevice.getInstance().openChunk(dev).close();
 				} catch (IOException e) {
@@ -984,34 +984,34 @@ public class DatabaseDescriptor {
 		conf.tombstone_failure_threshold = threshold;
 	}
 
-	/* FlashLog starts here */
+	/* CAPIFlashLog starts here */
 
 	public static String[] getFlashCommitLogDevices() {
-		return conf.flashlog_devices;
+		return conf.capiflashlog_devices;
 	}
 
 	public static int getFlashCommitLogSegmentSizeInBlocks() {
-		return conf.flashlog_segments_size_in_blocks;
+		return conf.capiflashlog_segments_size_in_blocks;
 	}
 
 	public static int getFlashCommitLogNumberOfSegments() {
-		return conf.flashlog_number_of_segments;
+		return conf.capiflashlog_number_of_segments;
 	}
 
 	public static int getFlashCommitLogNumberOfThreads() {
-		return conf.flashlog_threads;
+		return conf.capiflashlog_threads;
 	}
 
 	public static long getFlashCommitLogStartOffset() {
-		return conf.flashlog_start_offset;
+		return conf.capiflashlog_start_offset;
 	}
 
 	public static double getFlashCommitLogEmergencyValve() {
-		return conf.flashlog_emergency_valve;
+		return conf.capiflashlog_emergency_valve;
 	}
 
 	public static int getFlashCommitLogThreadBufferSizeinMB() {
-		return conf.flashlog_threads_buffer_size_in_mb;
+		return conf.capiflashlog_threads_buffer_size_in_mb;
 	}
 	
 	public static Config.CommitLogType getCommitLogType() {
