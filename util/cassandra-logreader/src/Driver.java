@@ -28,14 +28,14 @@ public class Driver {
 				String line;
 				int set = 0;
 				while ((line = br.readLine()) != null) {
-					if (line.startsWith("flashlog_devices:")) {
+					if (line.startsWith("capiflashlog_devices:")) {
 						line = br.readLine();
 						DEVICE = line.split("-")[1].trim();
 						set++;
-					} else if (line.startsWith("flashlog_number_of_segments:")) {
+					} else if (line.startsWith("capiflashlog_number_of_segments:")) {
 						NUM_BLOCKS = Integer.valueOf(line.split(":")[1].trim());
 						set++;
-					} else if (line.startsWith("flashlog_start_offset:")) {
+					} else if (line.startsWith("capiflashlog_start_offset:")) {
 						START_OFFSET = Long.valueOf(line.split(":")[1].trim());
 						set++;
 					}

@@ -150,14 +150,14 @@ public class Config
     public int commitlog_periodic_queue_size = 1024 * FBUtilities.getAvailableProcessors();
 
     
-    //Flash CommitLog
-    public long flashlog_start_offset;
-    public String[] flashlog_devices;
-    public int flashlog_threads;
-    public int flashlog_number_of_segments;
-    public int flashlog_segments_size_in_blocks;
-    public int flashlog_threads_buffer_size_in_mb;
-    public Double flashlog_emergency_valve;
+    //CAPI Flash CommitLog
+    public long capiflashlog_start_offset;
+    public String[] capiflashlog_devices;
+    public int capiflashlog_threads;
+    public int capiflashlog_number_of_segments;
+    public int capiflashlog_segments_size_in_blocks;
+    public int capiflashlog_threads_buffer_size_in_mb;
+    public Double capiflashlog_emergency_valve;
 
     public String endpoint_snitch;
     public Boolean dynamic_snitch = true;
@@ -272,7 +272,7 @@ public class Config
     public static enum CommitLogType
     {
         CommitLog,
-        FlashCommitLog
+        CAPIFlashCommitLog
     }
    
     

@@ -103,10 +103,10 @@ partitioner: org.apache.cassandra.dht.Murmur3Partitioner
 # will spread data evenly across them, subject to the granularity of
 # the configured compaction strategy.
 data_file_directories:
-    - /home/bsendir/temp/cassandra/data
+    - /Users/rodaira/Documents/Dev/Cassandra/flashlog/apache-cassandra-2.0.16-src-flashlog-data/data
 
 # commit log
-commitlog_directory: /home/bsendir/temp/cassandra/commitlog
+commitlog_directory: /Users/rodaira/Documents/Dev/Cassandra/flashlog/apache-cassandra-2.0.16-src-flashlog-data/commitlog
 
 # policy for data disk failures:
 # stop_paranoid: shut down gossip and Thrift even for single-sstable errors.
@@ -190,34 +190,35 @@ row_cache_save_period: 0
 # memory_allocator: NativeAllocator
 
 # saved caches
-saved_caches_directory: /home/bsendir/temp/cassandra/saved_caches
+saved_caches_directory: /Users/rodaira/Documents/Dev/Cassandra/flashlog/apache-cassandra-2.0.16-src-flashlog-data/saved_caches
 
-#CommitLog-FlashCommitLog
-#Type CommitLog or FlashCommitLog
-commitlog_type: FlashCommitLog
+#CommitLog-CAPIFlashCommitLog
+#Type CommitLog or CAPIFlashCommitLog
+commitlog_type: CommitLog
+#commitlog_type: CAPIFlashCommitLog
 
 #FlashCommitLog Settings
-flashlog_devices:
+capiflashlog_devices:
     - /dev/sg7
     - /dev/sg9
     
 #Start offset on physical LUN
-flashlog_start_offset: 30000000
+capiflashlog_start_offset: 30000000
 
 #Number of worker threads serializing and making synchronous calls to capi device
-flashlog_threads: 64
+capiflashlog_threads: 64
 
 #number of logical segments
-flashlog_number_of_segments: 128
+capiflashlog_number_of_segments: 128
 
 #records for each segment
-flashlog_segments_size_in_blocks: 32000
+capiflashlog_segments_size_in_blocks: 32000
 
 #size of the buffer allocated in each worker thread. this also checks max request size
-flashlog_threads_buffer_size_in_mb: 1
+capiflashlog_threads_buffer_size_in_mb: 1
 
 #emergency valve for flushing old commitlog segments. Flashcommitlog triggers flush when there is less than 0.2 segments left on flash
-flashlog_emergency_valve: 0.2
+capiflashlog_emergency_valve: 0.2
 
 
 

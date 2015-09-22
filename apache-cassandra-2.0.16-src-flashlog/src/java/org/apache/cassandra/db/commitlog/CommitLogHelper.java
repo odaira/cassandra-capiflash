@@ -5,6 +5,6 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 
 public class CommitLogHelper {
 	public static final ICommitLog instance = DatabaseDescriptor
-			.getCommitLogType() == Config.CommitLogType.FlashCommitLog ? FlashCommitLog.instance
+			.getCommitLogType() == Config.CommitLogType.CAPIFlashCommitLog ? FlashCommitLog.instance
 			: CommitLog.instance;
 }
