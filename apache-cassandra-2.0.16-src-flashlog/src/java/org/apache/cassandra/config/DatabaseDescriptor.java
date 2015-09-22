@@ -181,7 +181,7 @@ public class DatabaseDescriptor {
 						: 32;
 		} else if (conf.commitlog_type == Config.CommitLogType.CAPIFlashCommitLog) {
 			// CAPI Flash Commitlog Parameter Check
-			System.err.println("FlashCommitLog in use");
+			System.err.println("CAPIFlashCommitLog in use");
 			if (conf.capiflashlog_devices == null || conf.capiflashlog_devices == null
 					|| conf.capiflashlog_number_of_segments < 32
 					|| conf.capiflashlog_segments_size_in_blocks < 16000
