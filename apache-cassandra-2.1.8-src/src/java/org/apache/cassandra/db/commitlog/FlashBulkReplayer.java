@@ -15,7 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.db.capiflash;
+package org.apache.cassandra.db.commitlog;
 
 import java.io.DataInputStream;
 import java.io.IOException;
@@ -41,7 +41,6 @@ import org.apache.cassandra.db.ColumnSerializer;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.SystemKeyspace;
-import org.apache.cassandra.db.commitlog.ReplayPosition;
 import org.apache.cassandra.io.util.FastByteArrayInputStream;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.FBUtilities;
@@ -59,16 +58,14 @@ import com.ibm.research.capiblock.Chunk;
  *
  */
 public class FlashBulkReplayer {
-	private static int BULK_BLOCKS_TO_READ = FlashSegmentManager.BLOCKS_IN_SEG / 4;// 32
-																					// MB
-																					// pieces
+	private static int BULK_BLOCKS_TO_READ=8000;//32 MB pieces
 	static final Logger logger = LoggerFactory
 			.getLogger(FlashBulkReplayer.class);
 	private static final int MAX_OUTSTANDING_REPLAY_COUNT = 1024 * 1024; // this
 																			// is
 																			// 1024
 																			// by
-
+	
 	private final Set<Keyspace> keyspacesRecovered;
 	private final List<Future<?>> futures;
 	private final Map<UUID, AtomicInteger> invalidMutations;
@@ -77,11 +74,13 @@ public class FlashBulkReplayer {
 	private final ReplayPosition globalPosition;
 	private final Checksum checksum;
 	private ByteBuffer buffer;
-
+	private ByteBuffer readerBuffer;
+	
+	
 	public FlashBulkReplayer() {
 		this.keyspacesRecovered = new NonBlockingHashSet<Keyspace>();
 		this.futures = new ArrayList<Future<?>>();
-		buffer = ByteBuffer.allocateDirect(32000 * 4096);
+		buffer = ByteBuffer.allocateDirect(FlashSegmentManager.BLOCKS_IN_SEG*4096);
 		this.invalidMutations = new HashMap<UUID, AtomicInteger>();
 		this.replayedCount = new AtomicInteger();
 		this.checksum = new PureJavaCrc32();
@@ -107,14 +106,16 @@ public class FlashBulkReplayer {
 				rp = replayPositionOrdering.max(Arrays.asList(rp, truncatedAt));
 
 			cfPositions.put(cfs.metadata.cfId, rp);
-			if (rp.position == -1 || rp.segment == -1) {
-				logger.debug("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!   "
-						+ cfs.metadata.cfName);
-			}
 		}
 		globalPosition = replayPositionOrdering.min(cfPositions.values());
 		logger.debug("Global replay position is {} from columnfamilies {}"
 				+ globalPosition + "--- " + FBUtilities.toString(cfPositions));
+		
+		
+		
+		//allocate reader blocks
+		readerBuffer=ByteBuffer
+		.allocateDirect((int) (BULK_BLOCKS_TO_READ * 1024 * 4));
 	}
 
 	public void recover(FlashSegmentManager fsm) throws IOException {
@@ -129,12 +130,11 @@ public class FlashBulkReplayer {
 				replayPosition = globalPosition.position;
 			} else {
 				logger.debug("skipping replay of fully-flushed {}", key);
-				return;
+				continue;
 			}
 			logger.debug(segmentId + " Replaying " + key + " starting at "
 					+ replayPosition);
 			// get the start position
-			long startPosition = replayPosition;
 			long claimedCRC32;
 			int serializedSize;
 
@@ -146,15 +146,15 @@ public class FlashBulkReplayer {
 					* FlashSegmentManager.BLOCKS_IN_SEG)
 					+ replayPosition;
 			long blocks = 0;
+			//TODO read 128 mb
 			while (blocks != FlashSegmentManager.BLOCKS_IN_SEG) {
-				ByteBuffer temp = ByteBuffer
-						.allocateDirect((int) (BULK_BLOCKS_TO_READ * 1024 * 4));
+				readerBuffer.clear();
 				logger.debug("Reading " + start + " end:" + blocks);
 				ch.readBlock((FlashCommitLog.DATA_OFFSET + key
 						* FlashSegmentManager.BLOCKS_IN_SEG)
-						+ blocks, BULK_BLOCKS_TO_READ, temp);
+						+ blocks, BULK_BLOCKS_TO_READ, readerBuffer);
 				blocks += BULK_BLOCKS_TO_READ;
-				buffer.put(temp);
+				buffer.put(readerBuffer);
 			}
 			buffer.rewind();
 			buffer.position(replayPosition);
@@ -163,8 +163,9 @@ public class FlashBulkReplayer {
 				checksum.reset();
 				int mark = buffer.position();
 				long recordSegmentId = buffer.getLong();
+				
 				if (recordSegmentId != segmentId) {
-					logger.debug("Unidentified segment!! at" + mark);
+					logger.debug("1st:"+recordSegmentId+"-- "+segmentId+"Unidentified segment!! at" + mark); 
 					break;
 				}
 				serializedSize = buffer.getInt();
@@ -197,7 +198,7 @@ public class FlashBulkReplayer {
 				checksum.update(data, 0, serializedSize - 28);
 
 				if (claimedCRC32 != checksum.getValue()) {
-					logger.debug("Error!! Second Checksum Doesnot Match !!");
+					logger.debug("Error!! Second Checksum Doesnot Match !!"+claimedCRC32+"   "+checksum.getValue());
 					break;// TODO we check the record anyway, maybe continue
 							// instead of break
 				}
@@ -207,13 +208,13 @@ public class FlashBulkReplayer {
 				FastByteArrayInputStream bufIn = new FastByteArrayInputStream(
 						data, 0, serializedSize - 28);
 				final Mutation rm;
-				rm = Mutation.serializer.deserialize(
-						new DataInputStream(bufIn),
-						MessagingService.current_version,
+				rm = Mutation.serializer.deserialize(new DataInputStream(
+						bufIn), MessagingService.current_version,
 						ColumnSerializer.Flag.LOCAL);
 				for (ColumnFamily cf : rm.getColumnFamilies()) {
-					for (Cell cell : cf)
+					for (Cell cell : cf) {
 						cf.getComparator().validate(cell.name());
+					}
 				}
 
 				// check and compare with current replayposition
@@ -236,8 +237,8 @@ public class FlashBulkReplayer {
 							if (segmentId > rp.segment
 									|| (segmentId == rp.segment && entryLocation > rp.position)) {
 								if (newRm == null)
-									newRm = new Mutation(rm.getKeyspaceName(),
-											rm.key());
+									newRm = new Mutation(
+											rm.getKeyspaceName(), rm.key());
 								newRm.add(columnFamily);
 								replayedCount.incrementAndGet();
 							}

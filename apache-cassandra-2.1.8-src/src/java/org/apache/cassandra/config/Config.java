@@ -158,6 +158,7 @@ public class Config
     public String saved_caches_directory;
 
     // Commit Log
+    public CommitLogType commitlog_type;
     public String commitlog_directory;
     public Integer commitlog_total_space_in_mb;
     public CommitLogSync commitlog_sync;
@@ -165,6 +166,16 @@ public class Config
     public Integer commitlog_sync_period_in_ms;
     public int commitlog_segment_size_in_mb = 32;
 
+    //CAPI Flash CommitLog
+    public long capiflashlog_start_offset;
+    public String[] capiflashlog_devices;
+    public int capiflashlog_threads;
+    public int capiflashlog_number_of_segments;
+    public int capiflashlog_segments_size_in_blocks;
+    public int capiflashlog_threads_buffer_size_in_mb;
+    public Double capiflashlog_emergency_valve;
+
+    
     @Deprecated
     public int commitlog_periodic_queue_size = -1;
 
@@ -298,6 +309,13 @@ public class Config
         return csvListReader.read();
     }
 
+    public static enum CommitLogType
+    {
+        CommitLog,
+        CAPIFlashCommitLog
+    }
+   
+    
     public static enum CommitLogSync
     {
         periodic,

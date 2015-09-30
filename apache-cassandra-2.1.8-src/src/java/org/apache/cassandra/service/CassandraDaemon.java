@@ -51,8 +51,7 @@ import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.capiflash.FlashCommitLog;
-import org.apache.cassandra.db.commitlog.CommitLog;
+import org.apache.cassandra.db.commitlog.CommitLogHelper;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.FSError;
@@ -350,7 +349,7 @@ public class CassandraDaemon
             logger.warn("Unable to start GCInspector (currently only supported on the Sun JVM)");
         }
 
-        FlashCommitLog.instance.recover();
+        CommitLogHelper.instance.recover();
 
         // enable auto compaction
         for (Keyspace keyspace : Keyspace.all())

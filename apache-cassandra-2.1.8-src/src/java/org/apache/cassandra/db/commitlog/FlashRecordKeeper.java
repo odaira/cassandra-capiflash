@@ -15,9 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.db.capiflash;
-
-import org.apache.cassandra.db.commitlog.ReplayPosition;
+package org.apache.cassandra.db.commitlog;
 
 /**
  * @author bsendir
@@ -30,13 +28,12 @@ public class FlashRecordKeeper {
 	private int totalSize = 0;
 	private long requiredBlocks = 0;
 	private long segmentID = 0;
-	public ReplayPosition x=null;
+
 	
-	public FlashRecordKeeper(long num_blocks, long pos, long id,ReplayPosition reppos) {
+	public FlashRecordKeeper(long num_blocks, long pos, long id) {
 		requiredBlocks=num_blocks;
 		segmentID=id;
 		startBlock=pos;
-		x=reppos;
 	}
 
 	public long getStartBlock() {

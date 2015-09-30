@@ -63,7 +63,7 @@ public class CommitLog implements CommitLogMBean
     final CommitLogMetrics metrics;
     final AbstractCommitLogService executor;
 
-    private CommitLog()
+    protected CommitLog()
     {
         DatabaseDescriptor.createAllDirectories();
 
