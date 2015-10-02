@@ -19,12 +19,19 @@ package org.apache.cassandra.db.commitlog;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
 
 import org.apache.cassandra.concurrent.ScheduledExecutors;
@@ -38,6 +45,8 @@ import org.apache.cassandra.utils.Pair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
 import com.ibm.research.capiblock.Chunk;
 import com.ibm.research.capiblock.ObjectStreamBuffer;
 
@@ -168,7 +177,6 @@ public class FlashSegmentManager {
 
 	synchronized FlashRecordKeeper allocate(long num_blocks, Mutation rm) {
 		if (active == null || !active.hasCapacityFor(num_blocks)) {
-			//TODO Zero end of buffer or no ?
 			activateNextSegment();
 		}
 		active.markDirty(rm, active.getContext());
@@ -194,5 +202,102 @@ public class FlashSegmentManager {
 		}
 		unCommitted.clear();
 	}
+	// TODO
+		private Future<?> flushDataFrom(List<FlashSegment> segments, boolean force) {
+			if (segments.isEmpty())
+				return Futures.immediateFuture(null);
+			final ReplayPosition maxReplayPosition = segments.get(
+					segments.size() - 1).getContext();
+
+			// a map of CfId -> forceFlush() to ensure we only queue one flush per
+			// cf
+			final Map<UUID, ListenableFuture<?>> flushes = new LinkedHashMap<>();
+
+			for (FlashSegment segment : segments) {
+				for (UUID dirtyCFId : segment.getDirtyCFIDs()) {
+					Pair<String, String> pair = Schema.instance.getCF(dirtyCFId);
+					if (pair == null) {
+						// even though we remove the schema entry before a final
+						// flush when dropping a CF,
+						// it's still possible for a writer to race and finish his
+						// append after the flush.
+						logger.debug(
+								"Marking clean CF {} that doesn't exist anymore",
+								dirtyCFId);
+						segment.markClean(dirtyCFId, segment.getContext());
+					} else if (!flushes.containsKey(dirtyCFId)) {
+						String keyspace = pair.left;
+						final ColumnFamilyStore cfs = Keyspace.open(keyspace)
+								.getColumnFamilyStore(dirtyCFId);
+						// can safely call forceFlush here as we will only ever
+						// block (briefly) for other attempts to flush,
+						// no deadlock possibility since switchLock removal
+						flushes.put(
+								dirtyCFId,
+								force ? cfs.forceFlush() : cfs
+										.forceFlush(maxReplayPosition));
+					}
+				}
+			}
+
+			return Futures.allAsList(flushes.values());
+		}
+
+		public void forceRecycleAll(Iterable<UUID> droppedCfs) {
+			System.err.println("!____________________________________!");
+			List<FlashSegment> segmentsToRecycle = new ArrayList<>(
+					activeSegments);
+			FlashSegment last = segmentsToRecycle
+					.get(segmentsToRecycle.size() - 1);
+			//advanceAllocatingFrom(last);
+
+			// wait for the commit log modifications
+			//last.waitForModifications();
+
+			// make sure the writes have materialized inside of the memtables by
+			// waiting for all outstanding writes
+			// on the relevant keyspaces to complete
+			Set<Keyspace> keyspaces = new HashSet<>();
+			for (UUID cfId : last.getDirtyCFIDs()) {
+				ColumnFamilyStore cfs = Schema.instance
+						.getColumnFamilyStoreInstance(cfId);
+				if (cfs != null)
+					keyspaces.add(cfs.keyspace);
+			}
+			for (Keyspace keyspace : keyspaces)
+				keyspace.writeOrder.awaitNewBarrier();
+
+			// flush and wait for all CFs that are dirty in segments up-to and
+			// including 'last'
+			Future<?> future = flushDataFrom(segmentsToRecycle, true);
+			try {
+				future.get();
+
+				for (FlashSegment segment : activeSegments)
+					for (UUID cfId : droppedCfs)
+						segment.markClean(cfId, segment.getContext());
+
+				// now recycle segments that are unused, as we may not have
+				// triggered a discardCompletedSegments()
+				// if the previous active segment was the only one to recycle (since
+				// an active segment isn't
+				// necessarily dirty, and we only call dCS after a flush).
+				for (FlashSegment segment : activeSegments)
+					if (segment.isUnused())
+						recycleSegment(segment);
+
+				FlashSegment first;
+				if ((first = activeSegments.peek()) != null && first.id <= last.id)
+					logger.error("Failed to force-recycle all segments; at least one segment is still in use with dirty CFs.");
+			} catch (Throwable t) {
+				// for now just log the error and return false, indicating that we
+				// failed
+				logger.error(
+						"Failed waiting for a forced recycle of in-use commit log segments",
+						t);
+			}
+
+		}
+
 
 }

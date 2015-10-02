@@ -22,7 +22,6 @@ package org.apache.cassandra.db.commitlog;
  * Utility Class to keep offsets for a record. 
  *
  */
-//TODO I created this class for easier debugging. We could get rid of this class 
 public class FlashRecordKeeper {
 	private long startBlock = 0;
 	private int totalSize = 0;

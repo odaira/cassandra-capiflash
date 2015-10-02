@@ -48,7 +48,7 @@ import static org.apache.cassandra.db.commitlog.CommitLogSegment.*;
  * Commit Log tracks every write operation into the system. The aim of the commit log is to be able to
  * successfully recover data that was not stored to disk via the Memtable.
  */
-public class CommitLog implements CommitLogMBean
+public class CommitLog implements CommitLogMBean, ICommitLog
 {
     private static final Logger logger = LoggerFactory.getLogger(CommitLog.class);
 
@@ -92,7 +92,7 @@ public class CommitLog implements CommitLogMBean
      *
      * @return the number of mutations replayed
      */
-    public int recover() throws IOException
+    public int recover()
     {
         FilenameFilter unmanagedFilesFilter = new FilenameFilter()
         {
@@ -125,7 +125,13 @@ public class CommitLog implements CommitLogMBean
         {
             Arrays.sort(files, new CommitLogSegmentFileComparator());
             logger.info("Replaying {}", StringUtils.join(files, ", "));
-            replayed = recover(files);
+            try {
+				replayed = recover(files);
+			} catch (IOException e) {
+				System.err.println("Recovery error");
+				e.printStackTrace();
+				System.exit(1);
+			}
             logger.info("Log replay complete, {} replayed mutations", replayed);
 
             for (File f : files)

@@ -18,6 +18,7 @@
 package org.apache.cassandra.db.commitlog;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.UUID;
@@ -85,7 +86,7 @@ public class FlashCommitLog implements ICommitLog {
 	 * 
 	 * @param
 	 */
-	//TODO FIXIT
+	//TODO FIX return value
 	public ReplayPosition add(Mutation rm) {
 		try {
 			FlashWorker r = queue.take();
@@ -102,9 +103,7 @@ public class FlashCommitLog implements ICommitLog {
 						requiredBlocks);
 				return null;
 			}
-			FlashRecordKeeper adder = fsm.allocate(requiredBlocks, rm);// TODO
-																		// Synchronization
-																		// bottleneck
+			FlashRecordKeeper adder = fsm.allocate(requiredBlocks, rm);
 			adder.setSize((int) totalSize);
 			r.setOffset(adder);
 			queue.add((FlashWorker) exec.submit(r).get());// wait to finish
@@ -117,7 +116,7 @@ public class FlashCommitLog implements ICommitLog {
 		} catch (InterruptedException | ExecutionException e) {
 			e.printStackTrace();
 		}
-		return null;
+		return fsm.active.getContext();
 
 	}
 
@@ -229,7 +228,7 @@ public class FlashCommitLog implements ICommitLog {
 
 	/**
 	 * 
-	 * @return last position in commitlog //TODO ColumnFamilyStore.java Line 845
+	 * @return last position in commitlog
 	 *         writeLocks before calling this. Not sure if I need sync
 	 */
 	public ReplayPosition getContext() {
@@ -260,8 +259,15 @@ public class FlashCommitLog implements ICommitLog {
 		return flashThreads - queue.size();
 	}
 
-	public void forceRecycleAllSegments(List<UUID> droppedCfs) {
-		// TODO Auto-generated method stub
-		
+	// whilst we've flushed all the CFs, which will have recycled all completed
+	// segments, we want to ensure
+	// there are no segments to replay, so we force the recycling of any
+	// remaining (should be at most one)
+	public void forceRecycleAllSegments() {
+		forceRecycleAllSegments(Collections.<UUID> emptyList());
+	}
+
+	public void forceRecycleAllSegments(Iterable<UUID> droppedCfs) {
+		fsm.forceRecycleAll(droppedCfs);
 	}
 }
