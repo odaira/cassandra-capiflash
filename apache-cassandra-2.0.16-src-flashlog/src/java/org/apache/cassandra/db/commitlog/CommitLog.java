@@ -164,9 +164,14 @@ public class CommitLog implements CommitLogMBean, ICommitLog {
 	 * @return the number of mutations replayed
 	 */
 	public int recover(File... clogs) throws IOException {
+		long startTime = System.currentTimeMillis();
 		CommitLogReplayer recovery = new CommitLogReplayer();
 		recovery.recover(clogs);
-		return recovery.blockForWrites();
+		int count = recovery.blockForWrites();
+		long estimatedTime = System.currentTimeMillis() - startTime;
+		logger.debug("------------------------>" + " Replayed " + count
+				+ " records in " + estimatedTime);
+		return count;
 	}
 
 	/**
