@@ -225,6 +225,37 @@ counter_cache_save_period: 7200
 # If not set, the default directory is $CASSANDRA_HOME/data/saved_caches.
 # saved_caches_directory: /var/lib/cassandra/saved_caches
 
+#CommitLog-CAPIFlashCommitLog
+#Type CommitLog or CAPIFlashCommitLog
+commitlog_type: CommitLog
+#commitlog_type: CAPIFlashCommitLog
+
+#FlashCommitLog Settings
+capiflashlog_devices:
+    - /dev/sg7
+    - /dev/sg9
+    
+#Start offset on physical LUN
+capiflashlog_start_offset: 30000000
+
+#Number of worker threads serializing and making synchronous calls to capi device
+capiflashlog_threads: 64
+
+#number of logical segments
+capiflashlog_number_of_segments: 128
+
+#records for each segment
+capiflashlog_segments_size_in_blocks: 32000
+
+#size of the buffer allocated in each worker thread. this also checks max request size
+capiflashlog_threads_buffer_size_in_mb: 1
+
+#emergency valve for flushing old commitlog segments. Flashcommitlog triggers flush when there is less than 0.2 segments left on flash
+capiflashlog_emergency_valve: 0.2
+
+
+
+
 # commitlog_sync may be either "periodic" or "batch." 
 # 
 # When in batch mode, Cassandra won't ack writes until the commit log

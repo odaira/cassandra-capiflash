@@ -15,38 +15,28 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.db.capiflash;
+package org.apache.cassandra.db.commitlog;
 
 import java.io.IOException;
 import java.util.Collections;
 import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
-import org.apache.cassandra.config.Schema;
-import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Mutation;
-import org.apache.cassandra.db.commitlog.CommitLogSegment;
-import org.apache.cassandra.db.commitlog.ReplayPosition;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.utils.Pair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.google.common.util.concurrent.Futures;
-import com.google.common.util.concurrent.ListenableFuture;
 import com.ibm.research.capiblock.CapiBlockDevice;
 import com.ibm.research.capiblock.Chunk;
 
@@ -54,50 +44,35 @@ import com.ibm.research.capiblock.Chunk;
  * @author bsendir
  *
  */
-public class FlashCommitLog {
+public class FlashCommitLog implements ICommitLog {
 	// TUNABLES
 	static int BLOCK_SIZE = 4096;
-	static long START_OFFSET = 300000000L; // Bookkeeping starts here
-	static long DATA_OFFSET = START_OFFSET + FlashSegmentManager.MAX_SEGMENTS; // Commitlog
-																				// starts
-																				// here
-	static String[] DEVICES = { "/dev/sg7", "/dev/sg9" };
-	final int flashThreads = 128; // Number of workers to add on commitlog each
-									// worker serialize&writeblock
-	final int bufferSizeinMB = 1; // Size of Directly allocated buffer in
-									// workers
-
+	static long START_OFFSET = DatabaseDescriptor
+			.getFlashCommitLogStartOffset();
+	static String[] DEVICES = DatabaseDescriptor.getFlashCommitLogDevices();
+	static int flashThreads = DatabaseDescriptor
+			.getFlashCommitLogNumberOfThreads();
+	static int bufferSizeinMB = DatabaseDescriptor
+			.getFlashCommitLogThreadBufferSizeinMB();
+	static long DATA_OFFSET = START_OFFSET + FlashSegmentManager.MAX_SEGMENTS;
 	static final Logger logger = LoggerFactory.getLogger(FlashCommitLog.class);
 	public static final FlashCommitLog instance = new FlashCommitLog();
-
 	final CapiBlockDevice dev = CapiBlockDevice.getInstance();
-	// final BlockingQueue<Future<FlashWorker>> queue = new
-	// LinkedBlockingQueue<Future<FlashWorker>>(
-	// flashThreads);// Queue to reuse callables
 	final BlockingQueue<FlashWorker> queue = new LinkedBlockingQueue<FlashWorker>(
-			flashThreads);// Queue to reuse callables
+			flashThreads);
 	final ThreadPoolExecutor exec = (ThreadPoolExecutor) Executors
 			.newFixedThreadPool(flashThreads);
-	// final ExecutorCompletionService<FlashWorker> completionService = new
-	// ExecutorCompletionService<FlashWorker>(
-	// exec, queue);
+
 	protected volatile FlashSegmentManager fsm;
 
-	private FlashCommitLog() {
+	protected FlashCommitLog() {
 		try {
 			Chunk chunk = dev.openChunk(DEVICES[0]);
 			fsm = new FlashSegmentManager(chunk);
-			for (int i = 0; i < flashThreads; i++) {// Pre allocate workers and
-													// fake them into completion
-													// service
-				Chunk chunkl = dev.openChunk(DEVICES[i % 2]);
-				queue.add(new FlashWorker(chunkl, bufferSizeinMB));// TODO might
-																	// want to
-																	// replace
-																	// this
-																	// with
-																	// JAVA8
-																	// Completedfuture
+			for (int i = 0; i < flashThreads; i++) {
+				// Pre allocate workers
+				Chunk chunkl = dev.openChunk(DEVICES[i % DEVICES.length]);
+				queue.add(new FlashWorker(chunkl, bufferSizeinMB));
 			}
 		} catch (IOException e1) {
 			e1.printStackTrace();
@@ -111,27 +86,40 @@ public class FlashCommitLog {
 	 * 
 	 * @param
 	 */
+	// TODO FIX return value
 	public ReplayPosition add(Mutation rm) {
+
 		try {
 			FlashWorker r = queue.take();
 			r.setMessage(rm);
 			long totalSize = Mutation.serializer.serializedSize(rm,
 					MessagingService.current_version) + 28;
 			long requiredBlocks = getBlockCount(totalSize);
-			FlashRecordKeeper adder = fsm.allocate(requiredBlocks, rm);// TODO
-																		// Synchronization
-																		// bottleneck
+			if (requiredBlocks > DatabaseDescriptor
+					.getFlashCommitLogSegmentSizeInBlocks()
+					|| requiredBlocks > DatabaseDescriptor
+							.getFlashCommitLogThreadBufferSizeinMB() * (256)) {
+				logger.warn(
+						"Skipping commitlog append of extremely large mutation Blocks: {}",
+						requiredBlocks);
+				return null;
+			}
+			FlashRecordKeeper adder = fsm.allocate(requiredBlocks, rm);
 			adder.setSize((int) totalSize);
 			r.setOffset(adder);
-			queue.add((FlashWorker) exec.submit(r).get());
+			queue.add((FlashWorker) exec.submit(r).get());// wait to finish
+			long reppos = adder.getStartBlock() + adder.getRequiredBlocks();
 			synchronized (queue) {
 				if (queue.size() == flashThreads) {
 					queue.notify();
 				}
 			}
-			return adder.x;
+			// TODO see Memtable.java L147
+			return new ReplayPosition(fsm.active.id, (int) reppos);
+
 		} catch (InterruptedException | ExecutionException e) {
 			e.printStackTrace();
+			System.exit(0);
 		}
 		return null;
 	}
@@ -150,15 +138,6 @@ public class FlashCommitLog {
 	public void discardCompletedSegments(UUID cfId, final ReplayPosition context) {
 		// Keyspace has a static ReEntrantLock. It writeLocks globally.
 		// So we only need to wait for writetoFlash to finish
-		// TODO Find elegant way to achieve this to avoid polling
-		// Go thru the active segment files, which are ordered oldest to
-		// newest, marking the
-		// flushed CF as clean, until we reach the segment file
-		// containing the ReplayPosition passed
-		// in the arguments. Any segments that become unused after they
-		// are marked clean will be
-		// recycled or discarded.
-
 		synchronized (queue) {
 			if (queue.size() != flashThreads) {
 				try {
@@ -173,6 +152,14 @@ public class FlashCommitLog {
 				}
 			}
 		}
+
+		// Go thru the active segment files, which are ordered oldest to
+		// newest, marking the
+		// flushed CF as clean, until we reach the segment file
+		// containing the ReplayPosition passed
+		// in the arguments. Any segments that become unused after they
+		// are marked clean will be
+		// recycled or discarded.
 		for (Iterator<FlashSegment> iter = fsm.getActiveSegments().iterator(); iter
 				.hasNext();) {
 			FlashSegment segment = iter.next();
@@ -206,7 +193,7 @@ public class FlashCommitLog {
 	/**
 	 * Recover
 	 */
-	public void recover() {
+	public int recover() {
 		long startTime = System.currentTimeMillis();
 		FlashBulkReplayer r = new FlashBulkReplayer();
 		try {
@@ -219,6 +206,7 @@ public class FlashCommitLog {
 		long estimatedTime = System.currentTimeMillis() - startTime;
 		logger.debug("------------------------>" + " Replayed " + count
 				+ " records in " + estimatedTime);
+		return (int) count;
 	}
 
 	/**
@@ -228,6 +216,16 @@ public class FlashCommitLog {
 		exec.shutdown();
 		try {
 			exec.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
+			Iterator<FlashWorker> it = queue.iterator();
+			while (it.hasNext()) {
+				it.next().closeChunk();
+			}
+			try {
+				fsm.bookkeeper.close();
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+
 		} catch (InterruptedException e) {
 			e.printStackTrace();
 		}
@@ -235,28 +233,22 @@ public class FlashCommitLog {
 
 	/**
 	 * 
-	 * @return last position in commitlog //TODO ColumnFamilyStore.java Line 845
-	 *         writeLocks before calling this. Not sure if I need sync
+	 * @return last position in commitlog writeLocks before calling this. Not
+	 *         sure if I need sync
 	 */
 	public ReplayPosition getContext() {
+		// TODO ColumFamiltStore.flush ensures that all write ops are finished.
+		// We can get rid of the synchronization after testing.
 		synchronized (queue) {
 			if (queue.size() != flashThreads) {
 				try {
-					long startTime = System.currentTimeMillis();
 					queue.wait();
-					long estimatedTime = System.currentTimeMillis() - startTime;
-					logger.debug("------------------------>"
-							+ " Wait miliseconds " + estimatedTime);
-
 				} catch (InterruptedException e) {
 					e.printStackTrace();
 				}
 			}
 		}
-		synchronized (fsm.active) {// TODO return accurate context on memtable
-									// not sure if I need this there
-			return fsm.active.getContext();
-		}
+		return fsm.active.getContext();
 	}
 
 	/**
@@ -269,7 +261,7 @@ public class FlashCommitLog {
 		return (long) (Math.ceil((double) size / (FlashCommitLog.BLOCK_SIZE)));
 	}
 
-	public int getPendingTasks() {
+	public long getPendingTasks() {
 		return flashThreads - queue.size();
 	}
 
@@ -284,5 +276,4 @@ public class FlashCommitLog {
 	public void forceRecycleAllSegments(Iterable<UUID> droppedCfs) {
 		fsm.forceRecycleAll(droppedCfs);
 	}
-
 }

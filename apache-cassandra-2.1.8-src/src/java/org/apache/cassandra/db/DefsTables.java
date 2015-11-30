@@ -26,8 +26,7 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.MapDifference;
 import com.google.common.collect.Maps;
 
-import org.apache.cassandra.db.capiflash.FlashCommitLog;
-import org.apache.cassandra.db.commitlog.CommitLog;
+import org.apache.cassandra.db.commitlog.CommitLogHelper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.apache.cassandra.config.CFMetaData;
@@ -477,7 +476,7 @@ public class DefsTables
         keyspace.writeOrder.awaitNewBarrier();
 
         // force a new segment in the CL
-        FlashCommitLog.instance.forceRecycleAllSegments(droppedCfs);
+        CommitLogHelper.instance.forceRecycleAllSegments(droppedCfs);
 
         if (!StorageService.instance.isClientMode())
         {
@@ -507,7 +506,7 @@ public class DefsTables
             Keyspace.open(ksm.name).dropCf(cfm.cfId);
             MigrationManager.instance.notifyDropColumnFamily(cfm);
 
-            FlashCommitLog.instance.forceRecycleAllSegments(Collections.singleton(cfm.cfId));
+            CommitLogHelper.instance.forceRecycleAllSegments(Collections.singleton(cfm.cfId));
         }
     }
 

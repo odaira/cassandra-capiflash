@@ -4,7 +4,7 @@
  * distributed with this work for additional information
  * regarding copyright ownership.  The ASF licenses this file
  * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
+ * * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
@@ -44,8 +44,7 @@ import org.apache.cassandra.cache.*;
 import org.apache.cassandra.concurrent.*;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.config.CFMetaData.SpeculativeRetry;
-import org.apache.cassandra.db.capiflash.FlashCommitLog;
-import org.apache.cassandra.db.commitlog.CommitLog;
+import org.apache.cassandra.db.commitlog.CommitLogHelper;
 import org.apache.cassandra.db.commitlog.ReplayPosition;
 import org.apache.cassandra.db.compaction.*;
 import org.apache.cassandra.db.composites.CellName;
@@ -1019,7 +1018,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             // and so not set a lastReplayPosition
             if (lastReplayPosition != null)
             {
-                FlashCommitLog.instance.discardCompletedSegments(metadata.cfId, lastReplayPosition);
+               CommitLogHelper.instance.discardCompletedSegments(metadata.cfId, lastReplayPosition);
             }
 
             metric.pendingFlushes.dec();
@@ -1078,7 +1077,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             ReplayPosition lastReplayPosition;
             while (true)
             {
-                lastReplayPosition = new Memtable.LastReplayPosition(FlashCommitLog.instance.getContext());
+                lastReplayPosition = new Memtable.LastReplayPosition(CommitLogHelper.instance.getContext());
                 ReplayPosition currentLast = lastReplayPositionHolder.get();
                 if ((currentLast == null || currentLast.compareTo(lastReplayPosition) <= 0)
                     && lastReplayPositionHolder.compareAndSet(currentLast, lastReplayPosition))

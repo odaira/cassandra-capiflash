@@ -85,8 +85,7 @@ import org.apache.cassandra.db.SchemaCheckVerbHandler;
 import org.apache.cassandra.db.SnapshotDetailsTabularData;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.TruncateVerbHandler;
-import org.apache.cassandra.db.capiflash.FlashCommitLog;
-import org.apache.cassandra.db.commitlog.CommitLog;
+import org.apache.cassandra.db.commitlog.CommitLogHelper;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.index.SecondaryIndex;
 import org.apache.cassandra.dht.BootStrapper;
@@ -703,7 +702,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                     logger.warn("Caught exception while waiting for memtable flushes during shutdown hook", t);
                 }
 
-                FlashCommitLog.instance.shutdownBlocking();
+                CommitLogHelper.instance.shutdownBlocking();
 
                 // wait for miscellaneous tasks like sstable and commitlog segment deletion
                 ScheduledExecutors.nonPeriodicTasks.shutdown();
@@ -3857,7 +3856,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 	//FlashCommitLog.instance.
         ColumnFamilyStore.shutdownPostFlushExecutor();
 
-        FlashCommitLog.instance.shutdownBlocking();
+        CommitLogHelper.instance.shutdownBlocking();
 
         // wait for miscellaneous tasks like sstable and commitlog segment deletion
         ScheduledExecutors.nonPeriodicTasks.shutdown();

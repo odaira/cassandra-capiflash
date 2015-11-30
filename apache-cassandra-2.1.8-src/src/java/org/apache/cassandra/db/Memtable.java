@@ -34,8 +34,7 @@ import org.apache.cassandra.utils.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.capiflash.FlashCommitLog;
-import org.apache.cassandra.db.commitlog.CommitLog;
+import org.apache.cassandra.db.commitlog.CommitLogHelper;
 import org.apache.cassandra.db.commitlog.ReplayPosition;
 import org.apache.cassandra.db.composites.CellNameType;
 import org.apache.cassandra.db.index.SecondaryIndexManager;
@@ -64,7 +63,7 @@ public class Memtable
     // the last ReplayPosition owned by this Memtable; all ReplayPositions lower are owned by this or an earlier Memtable
     private volatile AtomicReference<ReplayPosition> lastReplayPosition;
     // the "first" ReplayPosition owned by this Memtable; this is inaccurate, and only used as a convenience to prevent CLSM flushing wantonly
-    private final ReplayPosition minReplayPosition = FlashCommitLog.instance.getContext();
+    private final ReplayPosition minReplayPosition = CommitLogHelper.instance.getContext();
 
     public static final class LastReplayPosition extends ReplayPosition
     {

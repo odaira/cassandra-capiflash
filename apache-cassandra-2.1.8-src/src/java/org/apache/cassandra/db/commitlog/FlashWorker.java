@@ -15,7 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.db.capiflash;
+package org.apache.cassandra.db.commitlog;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -44,13 +44,14 @@ public class FlashWorker implements Callable {
 	private final Checksum checksum = new PureJavaCrc32();
 	private Mutation rm = null;
 	private FlashRecordKeeper info;
-
+	
 	public FlashWorker(Chunk chunk, int nsegmentSizeinMB) {
 		buffer = ByteBuffer.allocateDirect(nsegmentSizeinMB * 1024 * 1024);
 		bufferStream = new DataOutputByteBuffer(buffer);
 		ref = chunk;
 	}
 
+	//TODO Fix CHSUM
 	@Override
 	public Callable call() {
 		try {
@@ -76,6 +77,13 @@ public class FlashWorker implements Callable {
 
 	public void setOffset(FlashRecordKeeper adder) {
 		info = adder;
+	}
+	public void closeChunk(){
+		try {
+			ref.close();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
 	}
 
 }
