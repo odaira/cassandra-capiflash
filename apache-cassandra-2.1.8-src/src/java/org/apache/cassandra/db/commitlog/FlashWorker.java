@@ -29,7 +29,8 @@ import org.apache.cassandra.utils.PureJavaCrc32;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.ibm.research.capiblock.Chunk;
+import capiblocksim.Chunk;
+
 
 /**
  * @author bsendir

@@ -45,10 +45,10 @@ import org.apache.cassandra.utils.Pair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import capiblocksim.Chunk;
+
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
-import com.ibm.research.capiblock.Chunk;
-import com.ibm.research.capiblock.ObjectStreamBuffer;
 
 /**
  * @author bsendir

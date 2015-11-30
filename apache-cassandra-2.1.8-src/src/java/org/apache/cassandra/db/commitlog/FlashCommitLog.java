@@ -36,9 +36,10 @@ import org.apache.cassandra.net.MessagingService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import capiblocksim.CapiBlockDevice;
+import capiblocksim.Chunk;
+
 import com.google.common.util.concurrent.Futures;
-import com.ibm.research.capiblock.CapiBlockDevice;
-import com.ibm.research.capiblock.Chunk;
 
 /**
  * @author bsendir
@@ -67,6 +68,7 @@ public class FlashCommitLog implements ICommitLog {
 
 	protected FlashCommitLog() {
 		try {
+			logger.error(DEVICES[0]);
 			Chunk chunk = dev.openChunk(DEVICES[0]);
 			fsm = new FlashSegmentManager(chunk);
 			for (int i = 0; i < flashThreads; i++) {
@@ -95,6 +97,8 @@ public class FlashCommitLog implements ICommitLog {
 			long totalSize = Mutation.serializer.serializedSize(rm,
 					MessagingService.current_version) + 28;
 			long requiredBlocks = getBlockCount(totalSize);
+			logger.error("TotalSize="+totalSize);
+			logger.error("Required Blocks="+requiredBlocks);
 			if (requiredBlocks > DatabaseDescriptor
 					.getFlashCommitLogSegmentSizeInBlocks()
 					|| requiredBlocks > DatabaseDescriptor
@@ -116,7 +120,6 @@ public class FlashCommitLog implements ICommitLog {
 			}
 			// TODO see Memtable.java L147
 			return new ReplayPosition(fsm.active.id, (int) reppos);
-
 		} catch (InterruptedException | ExecutionException e) {
 			e.printStackTrace();
 			System.exit(0);
