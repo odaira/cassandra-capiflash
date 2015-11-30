@@ -86,8 +86,9 @@ public class FlashCommitLog implements ICommitLog {
 	 * 
 	 * @param
 	 */
-	//TODO FIX return value
+	// TODO FIX return value
 	public ReplayPosition add(Mutation rm) {
+
 		try {
 			FlashWorker r = queue.take();
 			r.setMessage(rm);
@@ -107,17 +108,20 @@ public class FlashCommitLog implements ICommitLog {
 			adder.setSize((int) totalSize);
 			r.setOffset(adder);
 			queue.add((FlashWorker) exec.submit(r).get());// wait to finish
+			long reppos = adder.getStartBlock() + adder.getRequiredBlocks();
 			synchronized (queue) {
 				if (queue.size() == flashThreads) {
 					queue.notify();
 				}
 			}
+			// TODO see Memtable.java L147
+			return new ReplayPosition(fsm.active.id, (int) reppos);
 
 		} catch (InterruptedException | ExecutionException e) {
 			e.printStackTrace();
+			System.exit(0);
 		}
-		return fsm.active.getContext();
-
+		return null;
 	}
 
 	/**
@@ -140,8 +144,9 @@ public class FlashCommitLog implements ICommitLog {
 					long startTime = System.currentTimeMillis();
 					queue.wait();
 					long estimatedTime = System.currentTimeMillis() - startTime;
-					logger.debug("------------------------>" + " Wait miliseconds " + estimatedTime);
-					
+					logger.debug("------------------------>"
+							+ " Wait miliseconds " + estimatedTime);
+
 				} catch (InterruptedException e) {
 					e.printStackTrace();
 				}
@@ -212,15 +217,15 @@ public class FlashCommitLog implements ICommitLog {
 		try {
 			exec.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
 			Iterator<FlashWorker> it = queue.iterator();
-			while(it.hasNext()){
-			     it.next().closeChunk();
-			 }
+			while (it.hasNext()) {
+				it.next().closeChunk();
+			}
 			try {
 				fsm.bookkeeper.close();
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
-			
+
 		} catch (InterruptedException e) {
 			e.printStackTrace();
 		}
@@ -228,10 +233,12 @@ public class FlashCommitLog implements ICommitLog {
 
 	/**
 	 * 
-	 * @return last position in commitlog
-	 *         writeLocks before calling this. Not sure if I need sync
+	 * @return last position in commitlog writeLocks before calling this. Not
+	 *         sure if I need sync
 	 */
 	public ReplayPosition getContext() {
+		// TODO ColumFamiltStore.flush ensures that all write ops are finished.
+		// We can get rid of the synchronization after testing.
 		synchronized (queue) {
 			if (queue.size() != flashThreads) {
 				try {
@@ -242,7 +249,6 @@ public class FlashCommitLog implements ICommitLog {
 			}
 		}
 		return fsm.active.getContext();
-
 	}
 
 	/**
