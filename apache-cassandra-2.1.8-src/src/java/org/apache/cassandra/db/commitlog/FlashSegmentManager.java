@@ -121,7 +121,6 @@ public class FlashSegmentManager {
 	private void flushOldestKeyspaces() {
 		{
 			FlashSegment oldestSegment = activeSegments.peek();
-
 			if (oldestSegment != null && oldestSegment != this.active) {
 				for (UUID dirtyCFId : oldestSegment.getDirtyCFIDs()) {
 					Pair<String, String> pair = Schema.instance.getCF(dirtyCFId);
@@ -135,23 +134,11 @@ public class FlashSegmentManager {
 					} else {
 						String keypace = pair.left;
 						final ColumnFamilyStore cfs = Keyspace.open(keypace).getColumnFamilyStore(dirtyCFId);
-						// flush shouldn't run on the commitlog executor, since
-						// it acquires Table.switchLock,
-						// which may already be held by a thread waiting for the
-						// CL executor (via getContext),
-						// causing deadlock
-						Runnable runnable = new Runnable() {
-							public void run() {
-								cfs.forceFlush();
-							}
-						};
-						// TODO FIX
-						ScheduledExecutors.optionalTasks.execute(runnable);
+						cfs.forceFlush();
 					}
 				}
 			}
 		}
-
 	}
 
 	synchronized void recycleSegment(final FlashSegment segment) {
@@ -197,7 +184,7 @@ public class FlashSegmentManager {
 		unCommitted.clear();
 	}
 
-	// TODO
+	
 	private Future<?> flushDataFrom(List<FlashSegment> segments, boolean force) {
 		if (segments.isEmpty())
 			return Futures.immediateFuture(null);
@@ -234,24 +221,20 @@ public class FlashSegmentManager {
 	public void forceRecycleAll(Iterable<UUID> droppedCfs) {
 		List<FlashSegment> segmentsToRecycle = new ArrayList<>(activeSegments);
 		FlashSegment last = segmentsToRecycle.get(segmentsToRecycle.size() - 1);
-		// TODO FIXIT
-		// advanceAllocatingFrom(last);
 		synchronized (this) {
 			activateNextSegment();
 		}
 
 		synchronized (FlashCommitLog.instance.queue) {
-			synchronized (FlashCommitLog.instance.queue) {
-				while (FlashCommitLog.instance.queue.size() != FlashCommitLog.instance.flashThreads) {
-					try {
-						long startTime = System.currentTimeMillis();
-						logger.error("deadlock !!!!");
-						FlashCommitLog.instance.queue.wait();
-						long estimatedTime = System.currentTimeMillis() - startTime;
-						logger.error("------------------------>" + " release Wait miliseconds " + estimatedTime);
-					} catch (InterruptedException e) {
-						e.printStackTrace();
-					}
+			while (FlashCommitLog.instance.queue.size() != FlashCommitLog.instance.flashThreads) {
+				try {
+					long startTime = System.currentTimeMillis();
+					// logger.error("deadlock !!!!");
+					FlashCommitLog.instance.queue.wait();
+					long estimatedTime = System.currentTimeMillis() - startTime;
+					logger.error("------------------------>" + " release Wait miliseconds " + estimatedTime);
+				} catch (InterruptedException e) {
+					e.printStackTrace();
 				}
 			}
 		}
