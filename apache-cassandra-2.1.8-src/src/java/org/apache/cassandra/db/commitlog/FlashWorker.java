@@ -33,7 +33,7 @@ import capiblocksim.Chunk;
 
 
 /**
- * @author bsendir
+ * @author bsendir1
  * Re-Usable Callable used for writing to flash. 
  */
 public class FlashWorker implements Callable {
