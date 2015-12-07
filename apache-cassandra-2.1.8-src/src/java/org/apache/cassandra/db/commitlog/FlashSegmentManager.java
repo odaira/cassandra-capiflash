@@ -34,21 +34,18 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
 
-import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
-import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.Pair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import capiblocksim.Chunk;
-
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
+import com.ibm.research.capiblock.Chunk;
 
 /**
  * @author bsendir
@@ -72,13 +69,6 @@ public class FlashSegmentManager {
 		bookkeeper = chunk;
 		unCommitted = new HashMap<Integer, Long>();
 		try {// There is only one instance of FSM
-				// deletethis
-			for (int i = 0; i < 128; i++) {
-				ByteBuffer test = ByteBuffer.allocate(4096);
-				bookkeeper.readBlock(i, 1, test);
-				logger.debug("INIT Read block from " + i + "-->" + test.getLong());
-			}
-
 			ByteBuffer recoverMe = ByteBuffer.allocateDirect(1024 * 4 * MAX_SEGMENTS);
 			bookkeeper.readBlock(FlashCommitLog.START_OFFSET, MAX_SEGMENTS, recoverMe);
 			for (int i = 0; i < MAX_SEGMENTS; i++) {
@@ -117,13 +107,6 @@ public class FlashSegmentManager {
 						+ (FlashCommitLog.START_OFFSET + active.getPB()));
 				buf.putLong(active.getID());
 				bookkeeper.writeBlock(FlashCommitLog.START_OFFSET + active.getPB(), 1, buf);
-
-				/*
-				ByteBuffer test = ByteBuffer.allocate(4096);
-				bookkeeper.readBlock(FlashCommitLog.START_OFFSET + active.getPB(), 1, test);
-				logger.debug(
-						"Read block from " + (FlashCommitLog.START_OFFSET + active.getPB()) + "-->" + test.getLong());
-				*/
 			} catch (IOException e) {
 				e.printStackTrace();
 			}

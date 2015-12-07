@@ -20,7 +20,6 @@ package org.apache.cassandra.db.commitlog;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.concurrent.Callable;
-import org.apache.cassandra.utils.PureJavaCrc32;
 
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.io.util.DataOutputByteBuffer;
@@ -29,7 +28,7 @@ import org.apache.cassandra.utils.PureJavaCrc32;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import capiblocksim.Chunk;
+import com.ibm.research.capiblock.Chunk;
 
 
 /**

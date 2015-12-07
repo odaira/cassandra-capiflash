@@ -20,13 +20,10 @@ package org.apache.cassandra.db.commitlog;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.Iterator;
-import java.util.List;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -37,10 +34,8 @@ import org.apache.cassandra.net.MessagingService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import capiblocksim.CapiBlockDevice;
-import capiblocksim.Chunk;
-
-import com.google.common.util.concurrent.Futures;
+import com.ibm.research.capiblock.CapiBlockDevice;
+import com.ibm.research.capiblock.Chunk;
 
 /**
  * @author bsendir
@@ -131,7 +126,6 @@ public class FlashCommitLog implements ICommitLog {
 			while (queue.size() != flashThreads) {
 				try {
 					long startTime = System.currentTimeMillis();
-					logger.error("deadlock !!!!");
 					queue.wait();
 					long estimatedTime = System.currentTimeMillis() - startTime;
 					logger.error("------------------------>" + " discard release Wait miliseconds " + estimatedTime);
