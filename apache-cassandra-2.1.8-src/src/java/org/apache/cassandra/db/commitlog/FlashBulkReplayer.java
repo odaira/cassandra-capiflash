@@ -29,7 +29,6 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.zip.Checksum;
 
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
@@ -72,7 +71,7 @@ public class FlashBulkReplayer {
 	private final AtomicInteger replayedCount;
 	private final Map<UUID, ReplayPosition> cfPositions;
 	private final ReplayPosition globalPosition;
-	private final Checksum checksum;
+	private final PureJavaCrc32 checksum;
 	private ByteBuffer buffer;
 	private ByteBuffer readerBuffer;
 	
@@ -191,7 +190,7 @@ public class FlashBulkReplayer {
 
 				int blocksToRead = (int) (FlashCommitLog
 						.getBlockCount(serializedSize));
-
+				checksum.reset();
 				byte[] data = new byte[(serializedSize - 28)];
 				buffer.get(data);
 				claimedCRC32 = buffer.getLong();
