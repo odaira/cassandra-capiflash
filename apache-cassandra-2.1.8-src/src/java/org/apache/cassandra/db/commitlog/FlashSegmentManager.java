@@ -72,6 +72,13 @@ public class FlashSegmentManager {
 		bookkeeper = chunk;
 		unCommitted = new HashMap<Integer, Long>();
 		try {// There is only one instance of FSM
+				// deletethis
+			for (int i = 0; i < 128; i++) {
+				ByteBuffer test = ByteBuffer.allocate(4096);
+				bookkeeper.readBlock(i, 1, test);
+				logger.debug("INIT Read block from " + i + "-->" + test.getLong());
+			}
+
 			ByteBuffer recoverMe = ByteBuffer.allocateDirect(1024 * 4 * MAX_SEGMENTS);
 			bookkeeper.readBlock(FlashCommitLog.START_OFFSET, MAX_SEGMENTS, recoverMe);
 			for (int i = 0; i < MAX_SEGMENTS; i++) {
@@ -79,6 +86,7 @@ public class FlashSegmentManager {
 				long segID = recoverMe.getLong();
 				if (segID != 0) {// Committed Segments will be 0 unCommitted
 									// Segments will contain the unique id
+					logger.debug(i + " is uncommitted with segment id " + segID);
 					unCommitted.put(i, segID);
 				}
 			}
@@ -106,9 +114,16 @@ public class FlashSegmentManager {
 			try {
 				ByteBuffer buf = ByteBuffer.allocateDirect(1024 * 4);
 				logger.debug("Activating " + active.getID() + " with PB:" + active.getPB() + " --> "
-						+ FlashCommitLog.START_OFFSET + active.getPB());
+						+ (FlashCommitLog.START_OFFSET + active.getPB()));
 				buf.putLong(active.getID());
 				bookkeeper.writeBlock(FlashCommitLog.START_OFFSET + active.getPB(), 1, buf);
+
+				/*
+				ByteBuffer test = ByteBuffer.allocate(4096);
+				bookkeeper.readBlock(FlashCommitLog.START_OFFSET + active.getPB(), 1, test);
+				logger.debug(
+						"Read block from " + (FlashCommitLog.START_OFFSET + active.getPB()) + "-->" + test.getLong());
+				*/
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
@@ -144,6 +159,7 @@ public class FlashSegmentManager {
 	synchronized void recycleSegment(final FlashSegment segment) {
 		activeSegments.remove(segment);
 		try {
+			logger.debug("Recycling "+segment.getID());
 			util.putLong(0);
 			bookkeeper.writeBlock(FlashCommitLog.START_OFFSET + segment.getPB(), 1, util);
 			util.clear();
@@ -159,7 +175,6 @@ public class FlashSegmentManager {
 
 	synchronized FlashRecordKeeper allocate(long num_blocks, Mutation rm) {
 		if (active == null || !active.hasCapacityFor(num_blocks)) {
-			logger.error("actiating new segment ->" + active.physical_block_address);
 			activateNextSegment();
 		}
 		active.markDirty(rm, active.getContext());
@@ -176,7 +191,7 @@ public class FlashSegmentManager {
 				util.putLong(0);
 				bookkeeper.writeBlock(FlashCommitLog.START_OFFSET + key, 1, util);
 				freelist.put(key);
-				logger.debug("activating key " + key);
+				logger.debug("Recycle after replay activating: " + key);
 			} catch (IOException | InterruptedException e) {
 				e.printStackTrace();
 			}
@@ -184,7 +199,6 @@ public class FlashSegmentManager {
 		unCommitted.clear();
 	}
 
-	
 	private Future<?> flushDataFrom(List<FlashSegment> segments, boolean force) {
 		if (segments.isEmpty())
 			return Futures.immediateFuture(null);

@@ -52,7 +52,6 @@ public class FlashWorker implements Callable {
 		ref = chunk;
 	}
 
-	//TODO Fix CHSUM
 	@Override
 	public Callable call() {
 		try {
@@ -65,7 +64,8 @@ public class FlashWorker implements Callable {
 			Mutation.serializer.serialize(rm, bufferStream,
 					MessagingService.current_version);
 			//update chsum
-			checksum.update(buffer,12,buffer.position()-12);
+			checksum.reset();
+			checksum.update(buffer,20,buffer.position()-20);
 			buffer.putLong(checksum.getValue());
 			ref.writeBlock(info.getStartBlock(), info.getRequiredBlocks(),
 					buffer);
