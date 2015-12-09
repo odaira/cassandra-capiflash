@@ -40,7 +40,6 @@ import java.util.UUID;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.primitives.Longs;
-import com.ibm.research.capiblock.CapiBlockDevice;
 
 import org.apache.cassandra.thrift.ThriftServer;
 import org.slf4j.Logger;
@@ -335,14 +334,12 @@ public class DatabaseDescriptor {
 				throw new ConfigurationException(
 						"Number of blocks can not be bigger than INTEGER.MAX_VALUE");
 			}
-			for (String dev : conf.capiflashlog_devices) {
-				try {
-					CapiBlockDevice.getInstance().openChunk(dev).close();
-				} catch (IOException e) {
-					throw new ConfigurationException(
-							"Check CAPI PATHS! Invalid Device Paths!!!");
-				}
-			}
+			/*
+			 * for (String dev : conf.capiflashlog_devices) { try {
+			 * CapiBlockDevice.getInstance().openChunk(dev).close(); } catch
+			 * (IOException e) { throw new ConfigurationException(
+			 * "Check CAPI PATHS! Invalid Device Paths!!!"); } }
+			 */
 
 		} else {
 			throw new ConfigurationException("Unidentified Value for Commitlog");
