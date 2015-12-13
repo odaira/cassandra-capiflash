@@ -55,7 +55,7 @@ public class FlashCommitLog implements ICommitLog {
 	final BlockingQueue<FlashWorker> queue = new LinkedBlockingQueue<FlashWorker>(flashThreads);
 	final ThreadPoolExecutor exec = (ThreadPoolExecutor) Executors.newFixedThreadPool(flashThreads);
 
-	protected volatile FlashSegmentManager fsm;
+	FlashSegmentManager fsm;
 
 	protected FlashCommitLog() {
 		try {
@@ -95,13 +95,12 @@ public class FlashCommitLog implements ICommitLog {
 			adder.setSize((int) totalSize);
 			r.setOffset(adder);
 			queue.add((FlashWorker) exec.submit(r).get());// wait to finish
-			long reppos = adder.getStartBlock() + adder.getRequiredBlocks();
 			synchronized (queue) {
 				if (queue.size() == flashThreads) {
-					queue.notifyAll();
+					queue.notify();
 				}
 			}
-			return new ReplayPosition(fsm.active.id, (int) reppos);
+			return new ReplayPosition(adder.getSegmentID(), (int) (adder.getStartBlock() + adder.getRequiredBlocks()));
 		} catch (InterruptedException | ExecutionException e) {
 			e.printStackTrace();
 			return null;
@@ -120,21 +119,6 @@ public class FlashCommitLog implements ICommitLog {
 	 *            the replay position of the flush
 	 */
 	public void discardCompletedSegments(UUID cfId, final ReplayPosition context) {
-		// Keyspace has a static ReEntrantLock. It writeLocks globally.
-		// So we only need to wait for writetoFlash to finish
-		synchronized (queue) {
-			while (queue.size() != flashThreads) {
-				try {
-					long startTime = System.currentTimeMillis();
-					queue.wait();
-					long estimatedTime = System.currentTimeMillis() - startTime;
-					logger.error("------------------------>" + " discard release Wait miliseconds " + estimatedTime);
-				} catch (InterruptedException e) {
-					e.printStackTrace();
-				}
-			}
-		}
-
 		// Go thru the active segment files, which are ordered oldest to
 		// newest, marking the
 		// flushed CF as clean, until we reach the segment file
@@ -142,30 +126,46 @@ public class FlashCommitLog implements ICommitLog {
 		// in the arguments. Any segments that become unused after they
 		// are marked clean will be
 		// recycled or discarded.
-		for (Iterator<FlashSegment> iter = fsm.getActiveSegments().iterator(); iter.hasNext();) {
-			FlashSegment segment = iter.next();
-			segment.markClean(cfId, context);
-			// If the segment is no longer needed, and we have another
-			// spare segment in the hopper
-			// (to keep the last segment from getting discarded), pursue
-			// either recycling or deleting
-			// this segment file.
-			if (iter.hasNext()) {
-				if (segment.isUnused()) {
-					logger.debug("Commit log segment {} is unused ", segment.physical_block_address);
-					fsm.recycleSegment(segment);
-				} else {
-					logger.debug("Not safe to delete commit log segment {}; dirty is {} ",
-							segment.physical_block_address, "  dirty:", segment.dirtyString());
-				}
-			} else {
-				logger.debug("Not deleting active commitlog segment {} " + segment.physical_block_address);
-			}
-			if (segment.contains(context)) {
-				break;
-			}
-		}
 
+		synchronized (queue) {
+			while (queue.size() != flashThreads) {
+				try {
+					long startTime = System.currentTimeMillis();
+					queue.wait();
+					long estimatedTime = System.currentTimeMillis() - startTime;
+					logger.debug("------------------------>" + " wait miliseconds " + estimatedTime);
+				} catch (InterruptedException e) {
+					e.printStackTrace();
+				}
+			}
+
+			logger.debug("discard completed log segments for {}, column family {}", context, cfId);
+			for (Iterator<FlashSegment> iter = fsm.getActiveSegments().iterator(); iter.hasNext();) {
+				FlashSegment segment = iter.next();
+				segment.markClean(cfId, context);
+				// If the segment is no longer needed, and we have another
+				// spare segment in the hopper
+				// (to keep the last segment from getting discarded), pursue
+				// either recycling or deleting
+				// this segment file.
+				if (iter.hasNext()) {
+					if (segment.isUnused()) {
+						logger.debug("Commit log segment {} is unused ", segment.physical_block_address);
+						fsm.recycleSegment(segment);
+					} else {
+						logger.debug("Not safe to delete commit log segment {}; dirty is {} ",
+								segment.physical_block_address, segment.dirtyString());
+					}
+				} else {
+					logger.debug("Not deleting active commitlog segment {} ", segment.physical_block_address);
+				}
+				if (segment.contains(context)) {
+					logger.debug("Segment " + segment.id + " contains the context");
+					break;
+				}
+			}
+			logger.debug("Worker Queue Size:"+queue.size()+" Items in freelist:"+fsm.freelist.size());
+		}
 	}
 
 	/**

@@ -33,7 +33,9 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 
+import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -56,7 +58,7 @@ public class FlashSegmentManager {
 	public static int MAX_SEGMENTS = DatabaseDescriptor.getFlashCommitLogNumberOfSegments();
 	public static int BLOCKS_IN_SEG = DatabaseDescriptor.getFlashCommitLogSegmentSizeInBlocks();
 	public static double EMERGENCY_VALVE = DatabaseDescriptor.getFlashCommitLogEmergencyValve();
-	private final BlockingQueue<Integer> freelist = new LinkedBlockingQueue<Integer>(MAX_SEGMENTS);
+	protected final BlockingQueue<Integer> freelist = new LinkedBlockingQueue<Integer>(MAX_SEGMENTS);
 	private final ConcurrentLinkedQueue<FlashSegment> activeSegments = new ConcurrentLinkedQueue<FlashSegment>();
 	ByteBuffer util = ByteBuffer.allocateDirect(1024 * 4);// utility buffer for
 															// bookkeping
@@ -64,6 +66,7 @@ public class FlashSegmentManager {
 	HashMap<Integer, Long> unCommitted;
 	Chunk bookkeeper = null;
 	volatile FlashSegment active;
+	private HashMap<String, ListenableFuture<?>> emergencyFlush = new HashMap<String, ListenableFuture<?>>();
 
 	FlashSegmentManager(Chunk chunk) {
 		bookkeeper = chunk;
@@ -96,11 +99,20 @@ public class FlashSegmentManager {
 
 	private void activateNextSegment() {
 		if (freelist.size() < MAX_SEGMENTS * EMERGENCY_VALVE) {
-			logger.debug("!!!!!!!----------!!!!!!!!!!--------!!!!!!!\nEmergency valve in action flushing oldest....");
+			logger.debug("Emergency valve in action. Available segments:" + freelist.size());
 			flushOldestKeyspaces();
 		}
 		try {
-			active = new FlashSegment(freelist.take());
+			Integer segid = freelist.poll(100000, TimeUnit.MILLISECONDS);
+			if (segid == null) {
+				logger.error("Freelist queue timeout --> " + Thread.currentThread().getName());
+				/*
+				 * for(FlashSegment s:activeSegments){
+				 * logger.error(s.dirtyString()); }
+				 */
+			}
+			// active = new FlashSegment(freelist.take());
+			active = new FlashSegment(segid);
 			try {
 				ByteBuffer buf = ByteBuffer.allocateDirect(1024 * 4);
 				logger.debug("Activating " + active.getID() + " with PB:" + active.getPB() + " --> "
@@ -117,32 +129,41 @@ public class FlashSegmentManager {
 	}
 
 	private void flushOldestKeyspaces() {
-		{
-			FlashSegment oldestSegment = activeSegments.peek();
-			if (oldestSegment != null && oldestSegment != this.active) {
-				for (UUID dirtyCFId : oldestSegment.getDirtyCFIDs()) {
-					Pair<String, String> pair = Schema.instance.getCF(dirtyCFId);
-					if (pair == null) {
-						// even though we remove the schema entry before a final
-						// flush when dropping a CF,
-						// it's still possible for a writer to race and finish
-						// his append after the flush.
-						logger.debug("Marking clean CF {} that doesn't exist anymore", dirtyCFId);
-						oldestSegment.markClean(dirtyCFId, oldestSegment.getContext());
-					} else {
-						String keypace = pair.left;
-						final ColumnFamilyStore cfs = Keyspace.open(keypace).getColumnFamilyStore(dirtyCFId);
-						cfs.forceFlush();
+		FlashSegment oldestSegment = activeSegments.peek();
+		if (oldestSegment != null && oldestSegment != this.active) {
+			for (UUID dirtyCFId : oldestSegment.getDirtyCFIDs()) {
+				Pair<String, String> pair = Schema.instance.getCF(dirtyCFId);
+				if (pair == null) {
+					// even though we remove the schema entry before a final
+					// flush when dropping a CF,
+					// it's still possible for a writer to race and finish
+					// his append after the flush.
+					logger.debug("Marking clean CF {} that doesn't exist anymore", dirtyCFId);
+					oldestSegment.markClean(dirtyCFId, oldestSegment.getContext());
+				} else {
+					String keypace = pair.left;
+					final ColumnFamilyStore cfs = Keyspace.open(keypace).getColumnFamilyStore(dirtyCFId);
+					logger.debug("Flushing oldest " + cfs.getColumnFamilyName());
+
+					// if the force flushed cf is in flush still do not issue
+					// new flush
+					if (emergencyFlush.containsKey(cfs.getColumnFamilyName())) {
+						if (!emergencyFlush.get(cfs.getColumnFamilyName()).isDone()) {
+							logger.debug("Skipping flushing " + cfs.getColumnFamilyName());
+							continue;
+						}
 					}
+					emergencyFlush.put(cfs.getColumnFamilyName(), cfs.forceFlush());
 				}
 			}
 		}
 	}
 
-	synchronized void recycleSegment(final FlashSegment segment) {
+	void recycleSegment(final FlashSegment segment) {
+		logger.debug("in recycle " + segment.id);
 		activeSegments.remove(segment);
 		try {
-			logger.debug("Recycling "+segment.getID());
+			logger.debug("Recycling " + segment.getID());
 			util.putLong(0);
 			bookkeeper.writeBlock(FlashCommitLog.START_OFFSET + segment.getPB(), 1, util);
 			util.clear();
@@ -221,21 +242,6 @@ public class FlashSegmentManager {
 		synchronized (this) {
 			activateNextSegment();
 		}
-
-		synchronized (FlashCommitLog.instance.queue) {
-			while (FlashCommitLog.instance.queue.size() != FlashCommitLog.instance.flashThreads) {
-				try {
-					long startTime = System.currentTimeMillis();
-					// logger.error("deadlock !!!!");
-					FlashCommitLog.instance.queue.wait();
-					long estimatedTime = System.currentTimeMillis() - startTime;
-					logger.error("------------------------>" + " release Wait miliseconds " + estimatedTime);
-				} catch (InterruptedException e) {
-					e.printStackTrace();
-				}
-			}
-		}
-
 		// make sure the writes have materialized inside of the memtables by
 		// waiting for all outstanding writes
 		// on the relevant keyspaces to complete
