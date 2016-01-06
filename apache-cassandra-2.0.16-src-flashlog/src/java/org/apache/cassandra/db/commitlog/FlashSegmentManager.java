@@ -26,6 +26,7 @@ import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.locks.Condition;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
@@ -38,22 +39,21 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.ibm.research.capiblock.Chunk;
-import com.ibm.research.capiblock.ObjectStreamBuffer;
 
 /**
  * @author bsendir
  *
  */
 public class FlashSegmentManager {
-	static final Logger logger = LoggerFactory
-			.getLogger(FlashSegmentManager.class);
+	Object allocationLock = new Object();
+	static final Logger logger = LoggerFactory.getLogger(FlashSegmentManager.class);
 	public static int MAX_SEGMENTS = DatabaseDescriptor.getFlashCommitLogNumberOfSegments();
 	public static int BLOCKS_IN_SEG = DatabaseDescriptor.getFlashCommitLogSegmentSizeInBlocks();
-	public static double EMERGENCY_VALVE = DatabaseDescriptor.getFlashCommitLogEmergencyValve(); 
-	private final BlockingQueue<Integer> freelist = new LinkedBlockingQueue<Integer>(
-			MAX_SEGMENTS);
+	public final BlockingQueue<Integer> freelist = new LinkedBlockingQueue<Integer>(MAX_SEGMENTS);
 	private final ConcurrentLinkedQueue<FlashSegment> activeSegments = new ConcurrentLinkedQueue<FlashSegment>();
-	ByteBuffer util = ByteBuffer.allocateDirect(1024 * 4);//utility buffer for bookkeping purposes
+	ByteBuffer util = ByteBuffer.allocateDirect(1024 * 4);// utility buffer for
+															// bookkeping
+															// purposes
 	HashMap<Integer, Long> unCommitted;
 	Chunk bookkeeper = null;
 	FlashSegment active;
@@ -61,13 +61,14 @@ public class FlashSegmentManager {
 	FlashSegmentManager(Chunk chunk) {
 		bookkeeper = chunk;
 		unCommitted = new HashMap<Integer, Long>();
-		try {//There is only one instance of FSM
+		try {// There is only one instance of FSM
 			ByteBuffer recoverMe = ByteBuffer.allocateDirect(1024 * 4 * MAX_SEGMENTS);
 			bookkeeper.readBlock(FlashCommitLog.START_OFFSET, MAX_SEGMENTS, recoverMe);
 			for (int i = 0; i < MAX_SEGMENTS; i++) {
 				recoverMe.position(i * FlashCommitLog.BLOCK_SIZE);
 				long segID = recoverMe.getLong();
-				if (segID != 0) {//Committed Segments will be 0 unCommitted Segments will contain the unique id
+				if (segID != 0) {// Committed Segments will be 0 unCommitted
+									// Segments will contain the unique id
 					unCommitted.put(i, segID);
 				}
 			}
@@ -86,73 +87,72 @@ public class FlashSegmentManager {
 	}
 
 	private void activateNextSegment() {
-		if(freelist.size()<MAX_SEGMENTS*EMERGENCY_VALVE){
-			logger.debug("!!!!!!!----------!!!!!!!!!!--------!!!!!!!Emergency valve in action flushing oldest....");
-			flushOldestKeyspaces();
-		}
+		Integer segid = null;
 		try {
-			active = new FlashSegment(freelist.take());
-			try {
-				ByteBuffer buf = ByteBuffer.allocateDirect(1024 * 4);
-				logger.debug("Activating " + active.getID() + " with PB:"
-						+ active.getPB() + " --> "
-						+ FlashCommitLog.START_OFFSET + active.getPB());
-				buf.putLong(active.getID());
-				bookkeeper.writeBlock(
-						FlashCommitLog.START_OFFSET + active.getPB(), 1, buf);
-			} catch (IOException e) {
-				e.printStackTrace();
+			segid = freelist.take();
+			// this is the last segment
+			if (freelist.isEmpty()) {
+				// do not accept any more writes
+				logger.debug("Entering into emergency state!!!!!!");
+				flushOldestKeyspaces();
+
 			}
-			activeSegments.add(active);
-		} catch (InterruptedException e) {
+		} catch (InterruptedException e1) {
+			e1.printStackTrace();
+		}
+		active = new FlashSegment(segid);
+		try {
+			ByteBuffer buf = ByteBuffer.allocateDirect(1024 * 4);
+			logger.debug("Activating " + active.getID() + " with PB:" + active.getPB() + " --> "
+					+ FlashCommitLog.START_OFFSET + active.getPB());
+			buf.putLong(active.getID());
+			bookkeeper.writeBlock(FlashCommitLog.START_OFFSET + active.getPB(), 1, buf);
+		} catch (IOException e) {
 			e.printStackTrace();
 		}
+		activeSegments.add(active);
 	}
 
 	private void flushOldestKeyspaces() {
-	    {
-	        FlashSegment oldestSegment = activeSegments.peek();
+		{
+			FlashSegment oldestSegment = activeSegments.peek();
 
-	        if (oldestSegment != null && oldestSegment != this.active)
-	        {
-	            for (UUID dirtyCFId : oldestSegment.getDirtyCFIDs())
-	            {
-	                Pair<String,String> pair = Schema.instance.getCF(dirtyCFId);
-	                if (pair == null)
-	                {
-	                    // even though we remove the schema entry before a final flush when dropping a CF,
-	                    // it's still possible for a writer to race and finish his append after the flush.
-	                    logger.debug("Marking clean CF {} that doesn't exist anymore", dirtyCFId);
-	                    oldestSegment.markClean(dirtyCFId, oldestSegment.getContext());
-	                }
-	                else
-	                {
-	                    String keypace = pair.left;
-	                    final ColumnFamilyStore cfs = Keyspace.open(keypace).getColumnFamilyStore(dirtyCFId);
-	                    // flush shouldn't run on the commitlog executor, since it acquires Table.switchLock,
-	                    // which may already be held by a thread waiting for the CL executor (via getContext),
-	                    // causing deadlock
-	                    Runnable runnable = new Runnable()
-	                    {
-	                        public void run()
-	                        {
-	                            cfs.forceFlush();
-	                        }
-	                    };
-	                    StorageService.optionalTasks.execute(runnable);
-	                }
-	            }
-	        }
-	    }
-		
+			if (oldestSegment != null && oldestSegment != this.active) {
+				for (UUID dirtyCFId : oldestSegment.getDirtyCFIDs()) {
+					Pair<String, String> pair = Schema.instance.getCF(dirtyCFId);
+					if (pair == null) {
+						// even though we remove the schema entry before a final
+						// flush when dropping a CF,
+						// it's still possible for a writer to race and finish
+						// his append after the flush.
+						logger.debug("Marking clean CF {} that doesn't exist anymore", dirtyCFId);
+						oldestSegment.markClean(dirtyCFId, oldestSegment.getContext());
+					} else {
+						String keypace = pair.left;
+						final ColumnFamilyStore cfs = Keyspace.open(keypace).getColumnFamilyStore(dirtyCFId);
+						// flush shouldn't run on the commitlog executor, since
+						// it acquires Table.switchLock,
+						// which may already be held by a thread waiting for the
+						// CL executor (via getContext),
+						// causing deadlock
+						Runnable runnable = new Runnable() {
+							public void run() {
+								cfs.forceFlush();
+							}
+						};
+						StorageService.optionalTasks.execute(runnable);
+					}
+				}
+			}
+		}
+
 	}
 
 	synchronized void recycleSegment(final FlashSegment segment) {
 		activeSegments.remove(segment);
 		try {
 			util.putLong(0);
-			bookkeeper.writeBlock(
-					FlashCommitLog.START_OFFSET + segment.getPB(), 1, util);
+			bookkeeper.writeBlock(FlashCommitLog.START_OFFSET + segment.getPB(), 1, util);
 			util.clear();
 			freelist.put((int) segment.getPB());
 		} catch (InterruptedException | IOException e) {
@@ -164,14 +164,36 @@ public class FlashSegmentManager {
 		return Collections.unmodifiableCollection(activeSegments);
 	}
 
-	synchronized FlashRecordKeeper allocate(long num_blocks, RowMutation rm) {
-		if (active == null || !active.hasCapacityFor(num_blocks)) {
-			//TODO Zero end of buffer or no ?
-			activateNextSegment();
+	FlashRecordKeeper allocate(long num_blocks, RowMutation rm) {
+		if (freelist.isEmpty()) {
+			logger.debug("Emergency state " +Thread.currentThread().getName());
+			Keyspace.switchLock.readLock().unlock();
+			Keyspace.switchLock.writeLock().lock();
+			try {
+				while (freelist.isEmpty()) {
+					try {
+						Keyspace.commitLogoutOfSpace.await();
+					} catch (InterruptedException e) {
+						e.printStackTrace();
+					}
+				}
+			} finally {
+				Keyspace.switchLock.writeLock().unlock();
+			}
+			logger.debug("Emergency state exit" +Thread.currentThread().getName());
+			Keyspace.switchLock.readLock().lock();
 		}
-		active.markDirty(rm, active.getContext());
-		return new FlashRecordKeeper(num_blocks,
-				active.getandAddPosition(num_blocks), active.getID());
+		//TODO FIXIT.CASE: released number of segments is not enough for the readers blocked.
+		//Maybe require at least num_of_writers segments 64 in this case.
+		FlashRecordKeeper allocd = null;
+		synchronized (allocationLock) {
+			if (active == null || !active.hasCapacityFor(num_blocks)) {
+				activateNextSegment();
+			}
+			active.markDirty(rm, active.getContext());
+			allocd = new FlashRecordKeeper(num_blocks, active.getandAddPosition(num_blocks), active.getID());
+		}
+		return allocd; 
 	}
 
 	/**
@@ -182,8 +204,7 @@ public class FlashSegmentManager {
 			try {
 				util.clear();
 				util.putLong(0);
-				bookkeeper.writeBlock(FlashCommitLog.START_OFFSET + key, 1,
-						util);
+				bookkeeper.writeBlock(FlashCommitLog.START_OFFSET + key, 1, util);
 				freelist.put(key);
 				logger.debug("activating key " + key);
 			} catch (IOException | InterruptedException e) {

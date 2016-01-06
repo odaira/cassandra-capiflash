@@ -56,23 +56,18 @@ import com.ibm.research.capiblock.Chunk;
 public class FlashCommitLog implements ICommitLog {
 	// TUNABLES
 	static int BLOCK_SIZE = 4096;
-	static long START_OFFSET = DatabaseDescriptor
-			.getFlashCommitLogStartOffset();
+	static long START_OFFSET = DatabaseDescriptor.getFlashCommitLogStartOffset();
 	static String[] DEVICES = DatabaseDescriptor.getFlashCommitLogDevices();
-	static int flashThreads = DatabaseDescriptor
-			.getFlashCommitLogNumberOfThreads();
-	static int bufferSizeinMB = DatabaseDescriptor
-			.getFlashCommitLogThreadBufferSizeinMB();
+	static int flashThreads = DatabaseDescriptor.getFlashCommitLogNumberOfThreads();
+	static int bufferSizeinMB = DatabaseDescriptor.getFlashCommitLogThreadBufferSizeinMB();
 	static long DATA_OFFSET = START_OFFSET + FlashSegmentManager.MAX_SEGMENTS;
 	static final Logger logger = LoggerFactory.getLogger(FlashCommitLog.class);
 	public static final FlashCommitLog instance = new FlashCommitLog();
 	final CapiBlockDevice dev = CapiBlockDevice.getInstance();
-	final BlockingQueue<FlashWorker> queue = new LinkedBlockingQueue<FlashWorker>(
-			flashThreads);
-	final ThreadPoolExecutor exec = (ThreadPoolExecutor) Executors
-			.newFixedThreadPool(flashThreads);
+	final BlockingQueue<FlashWorker> queue = new LinkedBlockingQueue<FlashWorker>(flashThreads);
+	final ThreadPoolExecutor exec = (ThreadPoolExecutor) Executors.newFixedThreadPool(flashThreads);
 
-	protected volatile FlashSegmentManager fsm;
+	public volatile FlashSegmentManager fsm;
 
 	protected FlashCommitLog() {
 		try {
@@ -82,6 +77,25 @@ public class FlashCommitLog implements ICommitLog {
 				// Pre allocate workers
 				Chunk chunkl = dev.openChunk(DEVICES[i % DEVICES.length]);
 				queue.add(new FlashWorker(chunkl, bufferSizeinMB));
+			}
+			if (DatabaseDescriptor.isCommitlogDebugEnabled()) {
+				new Thread(new Runnable() {
+					@Override
+					public void run() {
+						while (true) {
+							try {
+								Thread.sleep(5000);
+							} catch (InterruptedException e) {
+								e.printStackTrace();
+							}
+							logger.debug("--> Commitlog Monitor: Queue size:" + queue.size() + " Freelist Size="
+									+ fsm.freelist.size());
+							logger.debug(
+									"--> Commitlog Monitor: Readers Waiting:" + Keyspace.switchLock.getReadLockCount()
+											+ " Writers :" + Keyspace.switchLock.getWriteHoldCount());
+						}
+					}
+				}).start();
 			}
 		} catch (IOException e1) {
 			e1.printStackTrace();
@@ -97,32 +111,20 @@ public class FlashCommitLog implements ICommitLog {
 	 */
 	public void add(RowMutation rm) {
 		try {
+
 			FlashWorker r = queue.take();
 			r.setMessage(rm);
-			long totalSize = RowMutation.serializer.serializedSize(rm,
-					MessagingService.current_version) + 28;
+			long totalSize = RowMutation.serializer.serializedSize(rm, MessagingService.current_version) + 28;
 			long requiredBlocks = getBlockCount(totalSize);
-			if (requiredBlocks > DatabaseDescriptor
-					.getFlashCommitLogSegmentSizeInBlocks()
-					|| requiredBlocks > DatabaseDescriptor
-							.getFlashCommitLogThreadBufferSizeinMB() * (256)) {
-				logger.warn(
-						"Skipping commitlog append of extremely large mutation Blocks: {}",
-						requiredBlocks);
+			if (requiredBlocks > DatabaseDescriptor.getFlashCommitLogSegmentSizeInBlocks()
+					|| requiredBlocks > DatabaseDescriptor.getFlashCommitLogThreadBufferSizeinMB() * (256)) {
+				logger.warn("Skipping commitlog append of extremely large mutation Blocks: {}", requiredBlocks);
 				return;
 			}
-			FlashRecordKeeper adder = fsm.allocate(requiredBlocks, rm);// TODO
-																		// Synchronization
-																		// bottleneck
+			FlashRecordKeeper adder = fsm.allocate(requiredBlocks, rm);
 			adder.setSize((int) totalSize);
 			r.setOffset(adder);
 			queue.add((FlashWorker) exec.submit(r).get());// wait to finish
-			synchronized (queue) {
-				if (queue.size() == flashThreads) {
-					queue.notify();
-				}
-			}
-
 		} catch (InterruptedException | ExecutionException e) {
 			e.printStackTrace();
 		}
@@ -141,22 +143,6 @@ public class FlashCommitLog implements ICommitLog {
 	 *            the replay position of the flush
 	 */
 	public void discardCompletedSegments(UUID cfId, final ReplayPosition context) {
-		// Keyspace has a static ReEntrantLock. It writeLocks globally.
-		// So we only need to wait for writetoFlash to finish
-		synchronized (queue) {
-			if (queue.size() != flashThreads) {
-				try {
-					long startTime = System.currentTimeMillis();
-					queue.wait();
-					long estimatedTime = System.currentTimeMillis() - startTime;
-					logger.debug("------------------------>" + " Wait miliseconds " + estimatedTime);
-					
-				} catch (InterruptedException e) {
-					e.printStackTrace();
-				}
-			}
-		}
-
 		// Go thru the active segment files, which are ordered oldest to
 		// newest, marking the
 		// flushed CF as clean, until we reach the segment file
@@ -164,8 +150,7 @@ public class FlashCommitLog implements ICommitLog {
 		// in the arguments. Any segments that become unused after they
 		// are marked clean will be
 		// recycled or discarded.
-		for (Iterator<FlashSegment> iter = fsm.getActiveSegments().iterator(); iter
-				.hasNext();) {
+		for (Iterator<FlashSegment> iter = fsm.getActiveSegments().iterator(); iter.hasNext();) {
 			FlashSegment segment = iter.next();
 			segment.markClean(cfId, context);
 			// If the segment is no longer needed, and we have another
@@ -175,18 +160,14 @@ public class FlashCommitLog implements ICommitLog {
 			// this segment file.
 			if (iter.hasNext()) {
 				if (segment.isUnused()) {
-					logger.debug("Commit log segment {} is unused ",
-							segment.physical_block_address);
+					logger.debug("Commit log segment {} is unused ", segment.physical_block_address);
 					fsm.recycleSegment(segment);
 				} else {
-					logger.debug(
-							"Not safe to delete commit log segment {}; dirty is {} ",
-							segment.physical_block_address, "  dirty:",
-							segment.dirtyString());
+					logger.debug("Not safe to delete commit log segment {}; dirty is {} ",
+							segment.physical_block_address, "  dirty:", segment.dirtyString());
 				}
 			} else {
-				logger.debug("Not deleting active commitlog segment {} "
-						+ segment.physical_block_address);
+				logger.debug("Not deleting active commitlog segment {} ", segment.physical_block_address);
 			}
 			if (segment.contains(context)) {
 				break;
@@ -208,8 +189,7 @@ public class FlashCommitLog implements ICommitLog {
 		long count = r.blockForWrites();
 		fsm.recycleAfterReplay();
 		long estimatedTime = System.currentTimeMillis() - startTime;
-		logger.debug("------------------------>" + " Replayed " + count
-				+ " records in " + estimatedTime);
+		logger.debug("Commitlog Recovery: " + " Replayed " + count + " records in " + estimatedTime);
 		return (int) count;
 	}
 
@@ -221,15 +201,15 @@ public class FlashCommitLog implements ICommitLog {
 		try {
 			exec.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
 			Iterator<FlashWorker> it = queue.iterator();
-			while(it.hasNext()){
-			     it.next().closeChunk();
-			 }
+			while (it.hasNext()) {
+				it.next().closeChunk();
+			}
 			try {
 				fsm.bookkeeper.close();
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
-			
+
 		} catch (InterruptedException e) {
 			e.printStackTrace();
 		}
@@ -237,21 +217,10 @@ public class FlashCommitLog implements ICommitLog {
 
 	/**
 	 * 
-	 * @return last position in commitlog //TODO ColumnFamilyStore.java Line 845
-	 *         writeLocks before calling this. Not sure if I need sync
+	 * @return last position in commitlog
 	 */
 	public Future<ReplayPosition> getContext() {
-		synchronized (queue) {
-			if (queue.size() != flashThreads) {
-				try {
-					queue.wait();
-				} catch (InterruptedException e) {
-					e.printStackTrace();
-				}
-			}
-		}
 		return Futures.immediateFuture(fsm.active.getContext());
-
 	}
 
 	/**
@@ -267,4 +236,5 @@ public class FlashCommitLog implements ICommitLog {
 	public long getPendingTasks() {
 		return flashThreads - queue.size();
 	}
+
 }

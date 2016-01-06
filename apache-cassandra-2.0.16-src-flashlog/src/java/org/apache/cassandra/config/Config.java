@@ -157,8 +157,8 @@ public class Config
     public int capiflashlog_number_of_segments;
     public int capiflashlog_segments_size_in_blocks;
     public int capiflashlog_threads_buffer_size_in_mb;
-    public Double capiflashlog_emergency_valve;
-
+    public boolean capiflashlog_debug_enabled = false;
+    
     public String endpoint_snitch;
     public Boolean dynamic_snitch = true;
     public Integer dynamic_snitch_update_interval_in_ms = 100;
