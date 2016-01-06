@@ -990,6 +990,9 @@ public class DatabaseDescriptor {
 		return conf.capiflashlog_devices;
 	}
 
+	public static boolean isCommitlogDebugEnabled() {
+		return conf.capiflashlog_debug_enabled;
+	}
 	public static int getFlashCommitLogSegmentSizeInBlocks() {
 		return conf.capiflashlog_segments_size_in_blocks;
 	}
@@ -1006,9 +1009,6 @@ public class DatabaseDescriptor {
 		return conf.capiflashlog_start_offset;
 	}
 
-	public static double getFlashCommitLogEmergencyValve() {
-		return conf.capiflashlog_emergency_valve;
-	}
 
 	public static int getFlashCommitLogThreadBufferSizeinMB() {
 		return conf.capiflashlog_threads_buffer_size_in_mb;
