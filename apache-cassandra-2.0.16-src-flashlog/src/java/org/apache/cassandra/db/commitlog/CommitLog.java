@@ -277,7 +277,6 @@ public class CommitLog implements CommitLogMBean, ICommitLog {
 			}
 		};
 
-		FBUtilities.waitOnFuture(executor.submit(task));
 	}
 
 	/**
@@ -429,6 +428,18 @@ public class CommitLog implements CommitLogMBean, ICommitLog {
 			throw new AssertionError(
 					DatabaseDescriptor.getCommitFailurePolicy());
 		}
+	}
+
+	@Override
+	public boolean isEmpty() {
+		//Placeholder method to avoid exposing FlashCommitlog to ColumFamilyStore
+		return false;
+	}
+
+	@Override
+	public boolean isAvailable() {
+		// TODO Auto-generated method stub
+		return true;
 	}
 
 }

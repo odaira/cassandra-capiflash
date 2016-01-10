@@ -116,11 +116,11 @@ public class FlashSegment {
 		cfLastWrite.put(cfId, position);
 	}
 
-	public synchronized Collection<UUID> getDirtyCFIDs() {
+	public Collection<UUID> getDirtyCFIDs() {
 		return new ArrayList<>(cfLastWrite.keySet());
 	}
 
-	public synchronized void markClean(UUID cfId, ReplayPosition context) {
+	public void markClean(UUID cfId, ReplayPosition context) {
 		Integer lastWritten = cfLastWrite.get(cfId);
 		if (lastWritten != null
 				&& (!contains(context) || lastWritten < context.position)) {
@@ -128,7 +128,7 @@ public class FlashSegment {
 		}
 	}
 
-	public synchronized boolean isUnused() {
+	public boolean isUnused() {
 		return cfLastWrite.isEmpty();
 	}
 

@@ -1,5 +1,4 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
  * regarding copyright ownership.  The ASF licenses this file
@@ -22,78 +21,48 @@ import java.io.FileFilter;
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
+import java.util.*;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
+import javax.management.*;
 
-import javax.management.InstanceNotFoundException;
-import javax.management.MBeanRegistrationException;
-import javax.management.MBeanServer;
-import javax.management.MalformedObjectNameException;
-import javax.management.ObjectName;
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Function;
+import com.google.common.collect.*;
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.Uninterruptibles;
+import org.cliffc.high_scale_lib.NonBlockingHashMap;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.cache.IRowCacheEntry;
 import org.apache.cassandra.cache.KeyCacheKey;
+import org.apache.cassandra.cache.IRowCacheEntry;
 import org.apache.cassandra.cache.RowCacheKey;
 import org.apache.cassandra.cache.RowCacheSentinel;
 import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
 import org.apache.cassandra.config.CFMetaData;
-import org.apache.cassandra.config.CFMetaData.Caching;
 import org.apache.cassandra.config.CFMetaData.SpeculativeRetry;
 import org.apache.cassandra.config.ColumnDefinition;
-import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.columniterator.OnDiskAtomIterator;
 import org.apache.cassandra.db.commitlog.CommitLogHelper;
 import org.apache.cassandra.db.commitlog.FlashCommitLog;
 import org.apache.cassandra.db.commitlog.ReplayPosition;
-import org.apache.cassandra.db.compaction.AbstractCompactionStrategy;
-import org.apache.cassandra.db.compaction.CompactionManager;
-import org.apache.cassandra.db.compaction.LeveledCompactionStrategy;
-import org.apache.cassandra.db.compaction.LeveledManifest;
-import org.apache.cassandra.db.compaction.OperationType;
-import org.apache.cassandra.db.filter.ColumnSlice;
-import org.apache.cassandra.db.filter.ExtendedFilter;
-import org.apache.cassandra.db.filter.IDiskAtomFilter;
-import org.apache.cassandra.db.filter.QueryFilter;
-import org.apache.cassandra.db.filter.SliceQueryFilter;
+import org.apache.cassandra.db.compaction.*;
+import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.index.SecondaryIndex;
 import org.apache.cassandra.db.index.SecondaryIndexManager;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CompositeType;
-import org.apache.cassandra.dht.AbstractBounds;
-import org.apache.cassandra.dht.IPartitioner;
-import org.apache.cassandra.dht.LocalPartitioner;
+import org.apache.cassandra.dht.*;
 import org.apache.cassandra.dht.Range;
-import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.compress.CompressionParameters;
-import org.apache.cassandra.io.sstable.Component;
+import org.apache.cassandra.io.sstable.*;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.SSTable;
-import org.apache.cassandra.io.sstable.SSTableMetadata;
-import org.apache.cassandra.io.sstable.SSTableReader;
-import org.apache.cassandra.io.sstable.SSTableWriter;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.metrics.ColumnFamilyMetrics;
 import org.apache.cassandra.service.CacheService;
@@ -101,31 +70,9 @@ import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.streaming.StreamLockfile;
 import org.apache.cassandra.thrift.IndexExpression;
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.utils.Allocator;
-import org.apache.cassandra.utils.BatchRemoveIterator;
-import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.CloseableIterator;
-import org.apache.cassandra.utils.CounterId;
-import org.apache.cassandra.utils.DefaultInteger;
-import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.HeapAllocator;
-import org.apache.cassandra.utils.Interval;
-import org.apache.cassandra.utils.Pair;
-import org.apache.cassandra.utils.WrappedRunnable;
-import org.cliffc.high_scale_lib.NonBlockingHashMap;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.cassandra.utils.*;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Function;
-import com.google.common.collect.AbstractIterator;
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Iterables;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Sets;
-import com.google.common.util.concurrent.Futures;
-import com.google.common.util.concurrent.Uninterruptibles;
+import static org.apache.cassandra.config.CFMetaData.Caching;
 
 public class ColumnFamilyStore implements ColumnFamilyStoreMBean {
 	private static final Logger logger = LoggerFactory.getLogger(ColumnFamilyStore.class);
@@ -758,6 +705,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean {
 	 * Switch and flush the current memtable, if it was dirty. The forceSwitch
 	 * flag allow to force switching the memtable even if it is clean (though in
 	 * that case we don't flush, as there is no point).
+	 * 
+	 * @throws ExecutionException
+	 * @throws InterruptedException
 	 */
 	public Future<?> switchMemtable(final boolean writeCommitLog, boolean forceSwitch) {
 		/*
@@ -775,6 +725,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean {
 		try {
 			final Future<ReplayPosition> ctx = writeCommitLog ? CommitLogHelper.instance.getContext()
 					: Futures.immediateFuture(ReplayPosition.NONE);
+
 			// submit the memtable for any indexed sub-cfses, and our own.
 			final List<ColumnFamilyStore> icc = new ArrayList<ColumnFamilyStore>();
 			// don't assume that this.memtable is dirty; forceFlush can bring us
@@ -807,10 +758,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean {
 			// mark the flush in the commitlog header.
 			// a second executor makes sure the onMemtableFlushes get called in
 			// the right order,
-			// while keeping the wait-for-flush (future.get) out of anything
+			// while keeping the wait-for-flush (future) out of anything
 			// latency-sensitive.
-
-			WrappedRunnable postFlushRunnable = new WrappedRunnable() {
+			WrappedRunnable wrap = new WrappedRunnable() {
 				public void runMayThrow() throws InterruptedException, ExecutionException {
 					latch.await();
 
@@ -827,42 +777,27 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean {
 					if (writeCommitLog) {
 						// if we're not writing to the commit log, we are
 						// replaying the log, so marking
-						// the log header with "you can discard anything
-						// written before the context" is not valid
+						// the log header with "you can discard anything written
+						// before the context" is not valid
 						CommitLogHelper.instance.discardCompletedSegments(metadata.cfId, ctx.get());
 					}
 				}
 			};
-
-			// If regular commitlog is active continue with defult process.
-			if ((DatabaseDescriptor.getCommitLogType() == Config.CommitLogType.CommitLog) || !FlashCommitLog.instance.fsm.freelist.isEmpty()){
-				return postFlushExecutor.submit(postFlushRunnable);
-				
-			} else {
-				Future<?> emergency = postFlushExecutor.submit(postFlushRunnable);
-				try {
-					// make sure that we
-					emergency.get();
-					if (!FlashCommitLog.instance.fsm.freelist.isEmpty()) {//make sure that we have free freelist elemnts.
-						if (Keyspace.switchLock.hasWaiters(Keyspace.commitLogoutOfSpace)) { // TODO
-																							// find
-																							// elegant
-																							// solution
-																							// to
-																							// avoid
-																							// calling
-																							// hasWaiters
-							Keyspace.commitLogoutOfSpace.signalAll();
-						}
+			Future<?> postflush = postFlushExecutor.submit(wrap);
+			try {
+				if (CommitLogHelper.instance.isEmpty() || !CommitLogHelper.instance.isAvailable()) {
+					postflush.get();
+					if (CommitLogHelper.instance.isAvailable()) {
+						logger.error("SIGNALLING !!!!");
+						Keyspace.CLogisEmpty.signalAll();
 					}
-				} catch (InterruptedException e) {
-					e.printStackTrace();
-				} catch (ExecutionException e) {
-					e.printStackTrace();
 				}
-				return emergency;
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			} catch (ExecutionException e) {
+				e.printStackTrace();
 			}
-
+			return postflush;
 		} finally {
 			Keyspace.switchLock.writeLock().unlock();
 		}

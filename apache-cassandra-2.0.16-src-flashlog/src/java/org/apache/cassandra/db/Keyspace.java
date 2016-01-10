@@ -62,7 +62,7 @@ public class Keyspace
      * (Enabling fairness in the RRWL is observed to decrease throughput, so we leave it off.)
      */
     public static final ReentrantReadWriteLock switchLock = new ReentrantReadWriteLock();
-    public static final Condition commitLogoutOfSpace = switchLock.writeLock().newCondition();
+    public static final Condition CLogisEmpty = switchLock.writeLock().newCondition();
 	
     public final KeyspaceMetrics metric;
 

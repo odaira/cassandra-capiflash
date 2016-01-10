@@ -26,7 +26,10 @@ import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.Phaser;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.ReentrantLock;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
@@ -45,7 +48,8 @@ import com.ibm.research.capiblock.Chunk;
  *
  */
 public class FlashSegmentManager {
-	Object allocationLock = new Object();
+
+	static final ReentrantLock freelistState = new ReentrantLock();
 	static final Logger logger = LoggerFactory.getLogger(FlashSegmentManager.class);
 	public static int MAX_SEGMENTS = DatabaseDescriptor.getFlashCommitLogNumberOfSegments();
 	public static int BLOCKS_IN_SEG = DatabaseDescriptor.getFlashCommitLogSegmentSizeInBlocks();
@@ -56,7 +60,9 @@ public class FlashSegmentManager {
 															// purposes
 	HashMap<Integer, Long> unCommitted;
 	Chunk bookkeeper = null;
-	FlashSegment active;
+	volatile FlashSegment active;
+	AtomicInteger locked = new AtomicInteger(0);
+	AtomicInteger lockedonWait = new AtomicInteger(0);
 
 	FlashSegmentManager(Chunk chunk) {
 		bookkeeper = chunk;
@@ -148,7 +154,7 @@ public class FlashSegmentManager {
 
 	}
 
-	synchronized void recycleSegment(final FlashSegment segment) {
+	void recycleSegment(final FlashSegment segment) {
 		activeSegments.remove(segment);
 		try {
 			util.putLong(0);
@@ -164,36 +170,42 @@ public class FlashSegmentManager {
 		return Collections.unmodifiableCollection(activeSegments);
 	}
 
-	FlashRecordKeeper allocate(long num_blocks, RowMutation rm) {
-		if (freelist.isEmpty()) {
-			logger.debug("Emergency state " +Thread.currentThread().getName());
-			Keyspace.switchLock.readLock().unlock();
-			Keyspace.switchLock.writeLock().lock();
+	private void emergencyState() {
+		while (freelist.isEmpty()) {
 			try {
-				while (freelist.isEmpty()) {
-					try {
-						Keyspace.commitLogoutOfSpace.await();
-					} catch (InterruptedException e) {
-						e.printStackTrace();
-					}
+				logger.debug("Emergency state " + Thread.currentThread().getName());
+				locked.incrementAndGet();
+				Keyspace.switchLock.readLock().unlock();
+				Keyspace.switchLock.writeLock().lock();
+				lockedonWait.incrementAndGet();
+				if (freelist.isEmpty()) {
+					Keyspace.CLogisEmpty.awaitUninterruptibly();
 				}
+				lockedonWait.decrementAndGet();
+				Keyspace.switchLock.readLock().lock();
 			} finally {
 				Keyspace.switchLock.writeLock().unlock();
+				locked.decrementAndGet();
+				logger.debug("Emergency state exit" + Thread.currentThread().getName());
 			}
-			logger.debug("Emergency state exit" +Thread.currentThread().getName());
-			Keyspace.switchLock.readLock().lock();
 		}
-		//TODO FIXIT.CASE: released number of segments is not enough for the readers blocked.
-		//Maybe require at least num_of_writers segments 64 in this case.
+	}
+
+	FlashRecordKeeper allocate(long num_blocks, RowMutation rm) {
+		freelistState.lock();
+		while (freelist.isEmpty()) {
+			freelistState.unlock();
+			emergencyState();
+			freelistState.lock();
+		}
 		FlashRecordKeeper allocd = null;
-		synchronized (allocationLock) {
-			if (active == null || !active.hasCapacityFor(num_blocks)) {
-				activateNextSegment();
-			}
-			active.markDirty(rm, active.getContext());
-			allocd = new FlashRecordKeeper(num_blocks, active.getandAddPosition(num_blocks), active.getID());
+		if (active == null || !active.hasCapacityFor(num_blocks)) {
+			activateNextSegment();
 		}
-		return allocd; 
+		active.markDirty(rm, active.getContext());
+		allocd = new FlashRecordKeeper(num_blocks, active.getandAddPosition(num_blocks), active.getID());
+		freelistState.unlock();
+		return allocd;
 	}
 
 	/**
