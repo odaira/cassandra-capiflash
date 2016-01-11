@@ -22,5 +22,9 @@ public interface ICommitLog {
 	void shutdownBlocking() throws InterruptedException;
 
 	void discardCompletedSegments(UUID cfId, ReplayPosition x);
+
+	boolean isEmpty();
+
+	boolean isAvailable();
 		
 }

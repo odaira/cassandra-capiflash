@@ -50,8 +50,7 @@ import org.apache.cassandra.utils.FBUtilities;
  * successfully recover data that was not stored to disk via the Memtable.
  */
 public class CommitLog implements CommitLogMBean, ICommitLog {
-	private static final Logger logger = LoggerFactory
-			.getLogger(CommitLog.class);
+	private static final Logger logger = LoggerFactory.getLogger(CommitLog.class);
 
 	public static final CommitLog instance = new CommitLog();
 
@@ -76,13 +75,12 @@ public class CommitLog implements CommitLogMBean, ICommitLog {
 		allocator = new CommitLogAllocator();
 		activateNextSegment();
 
-		executor = DatabaseDescriptor.getCommitLogSync() == Config.CommitLogSync.batch ? new BatchCommitLogExecutorService()
-				: new PeriodicCommitLogExecutorService(this);
+		executor = DatabaseDescriptor.getCommitLogSync() == Config.CommitLogSync.batch
+				? new BatchCommitLogExecutorService() : new PeriodicCommitLogExecutorService(this);
 
 		MBeanServer mbs = ManagementFactory.getPlatformMBeanServer();
 		try {
-			mbs.registerMBean(this, new ObjectName(
-					"org.apache.cassandra.db:type=Commitlog"));
+			mbs.registerMBean(this, new ObjectName("org.apache.cassandra.db:type=Commitlog"));
 		} catch (Exception e) {
 			throw new RuntimeException(e);
 		}
@@ -114,15 +112,13 @@ public class CommitLog implements CommitLogMBean, ICommitLog {
 				// fragile; it is less error-prone to go
 				// ahead and allow writes before recover(), and just skip active
 				// segments when we do.
-				return CommitLogDescriptor.isValid(name)
-						&& !allocator.manages(name);
+				return CommitLogDescriptor.isValid(name) && !allocator.manages(name);
 			}
 		};
 
 		// submit all existing files in the commit log dir for archiving prior
 		// to recovery - CASSANDRA-6904
-		for (File file : new File(DatabaseDescriptor.getCommitLogLocation())
-				.listFiles(unmanagedFilesFilter)) {
+		for (File file : new File(DatabaseDescriptor.getCommitLogLocation()).listFiles(unmanagedFilesFilter)) {
 			archiver.maybeArchive(file.getPath(), file.getName());
 			archiver.maybeWaitForArchiving(file.getName());
 		}
@@ -130,14 +126,12 @@ public class CommitLog implements CommitLogMBean, ICommitLog {
 		assert archiver.archivePending.isEmpty() : "Not all commit log archive tasks were completed before restore";
 		archiver.maybeRestoreArchive();
 
-		File[] files = new File(DatabaseDescriptor.getCommitLogLocation())
-				.listFiles(unmanagedFilesFilter);
+		File[] files = new File(DatabaseDescriptor.getCommitLogLocation()).listFiles(unmanagedFilesFilter);
 		int replayed = 0;
 		if (files.length == 0) {
 			logger.info("No commitlog files found; skipping replay");
 		} else {
-			Arrays.sort(files,
-					new CommitLogSegment.CommitLogSegmentFileComparator());
+			Arrays.sort(files, new CommitLogSegment.CommitLogSegmentFileComparator());
 			logger.info("Replaying " + StringUtils.join(files, ", "));
 			try {
 				replayed = recover(files);
@@ -145,8 +139,7 @@ public class CommitLog implements CommitLogMBean, ICommitLog {
 				// TODO Auto-generated catch block
 				e.printStackTrace();
 			}
-			logger.info("Log replay complete, " + replayed
-					+ " replayed mutations");
+			logger.info("Log replay complete, " + replayed + " replayed mutations");
 
 			for (File f : files)
 				this.allocator.recycleSegment(f);
@@ -169,8 +162,7 @@ public class CommitLog implements CommitLogMBean, ICommitLog {
 		recovery.recover(clogs);
 		int count = recovery.blockForWrites();
 		long estimatedTime = System.currentTimeMillis() - startTime;
-		logger.debug("------------------------>" + " Replayed " + count
-				+ " records in " + estimatedTime);
+		logger.debug("------------------------>" + " Replayed " + count + " records in " + estimatedTime);
 		return count;
 	}
 
@@ -225,13 +217,10 @@ public class CommitLog implements CommitLogMBean, ICommitLog {
 	 * @param context
 	 *            the replay position of the flush
 	 */
-	public void discardCompletedSegments(final UUID cfId,
-			final ReplayPosition context) {
+	public void discardCompletedSegments(final UUID cfId, final ReplayPosition context) {
 		Callable task = new Callable() {
 			public Object call() {
-				logger.debug(
-						"discard completed log segments for {}, column family {}",
-						context, cfId);
+				logger.debug("discard completed log segments for {}, column family {}", context, cfId);
 
 				// Go thru the active segment files, which are ordered oldest to
 				// newest, marking the
@@ -240,8 +229,7 @@ public class CommitLog implements CommitLogMBean, ICommitLog {
 				// in the arguments. Any segments that become unused after they
 				// are marked clean will be
 				// recycled or discarded.
-				for (Iterator<CommitLogSegment> iter = allocator
-						.getActiveSegments().iterator(); iter.hasNext();) {
+				for (Iterator<CommitLogSegment> iter = allocator.getActiveSegments().iterator(); iter.hasNext();) {
 					CommitLogSegment segment = iter.next();
 					segment.markClean(cfId, context);
 
@@ -252,18 +240,14 @@ public class CommitLog implements CommitLogMBean, ICommitLog {
 					// this segment file.
 					if (iter.hasNext()) {
 						if (segment.isUnused()) {
-							logger.debug("Commit log segment {} is unused",
-									segment);
+							logger.debug("Commit log segment {} is unused", segment);
 							allocator.recycleSegment(segment);
 						} else {
-							logger.debug(
-									"Not safe to delete commit log segment {}; dirty is {}",
-									segment, segment.dirtyString());
+							logger.debug("Not safe to delete commit log segment {}; dirty is {}", segment,
+									segment.dirtyString());
 						}
 					} else {
-						logger.debug(
-								"Not deleting active commitlog segment {}",
-								segment);
+						logger.debug("Not deleting active commitlog segment {}", segment);
 					}
 
 					// Don't mark or try to delete any newer segments once we've
@@ -276,7 +260,6 @@ public class CommitLog implements CommitLogMBean, ICommitLog {
 				return null;
 			}
 		};
-
 		FBUtilities.waitOnFuture(executor.submit(task));
 	}
 
@@ -378,13 +361,10 @@ public class CommitLog implements CommitLogMBean, ICommitLog {
 		}
 
 		public void run() {
-			long totalSize = RowMutation.serializer.serializedSize(rowMutation,
-					MessagingService.current_version)
+			long totalSize = RowMutation.serializer.serializedSize(rowMutation, MessagingService.current_version)
 					+ CommitLogSegment.ENTRY_OVERHEAD_SIZE;
 			if (totalSize > DatabaseDescriptor.getCommitLogSegmentSize()) {
-				logger.warn(
-						"Skipping commitlog append of extremely large mutation ({} bytes)",
-						totalSize);
+				logger.warn("Skipping commitlog append of extremely large mutation ({} bytes)", totalSize);
 				return;
 			}
 
@@ -395,8 +375,7 @@ public class CommitLog implements CommitLogMBean, ICommitLog {
 				// to the new commit log.
 				// (Do this here instead of in the recycle call so we can get a
 				// head start on the archive.)
-				archiver.maybeArchive(oldSegment.getPath(),
-						oldSegment.getName());
+				archiver.maybeArchive(oldSegment.getPath(), oldSegment.getName());
 			}
 			try {
 				activeSegment.write(rowMutation);
@@ -417,18 +396,29 @@ public class CommitLog implements CommitLogMBean, ICommitLog {
 		case stop:
 			StorageService.instance.stopTransports();
 		case stop_commit:
-			logger.error(String.format(
-					"%s. Commit disk failure policy is %s; terminating thread",
-					message, DatabaseDescriptor.getCommitFailurePolicy()), t);
+			logger.error(String.format("%s. Commit disk failure policy is %s; terminating thread", message,
+					DatabaseDescriptor.getCommitFailurePolicy()), t);
 			return false;
 		case ignore:
 			logger.error(message, t);
 			Uninterruptibles.sleepUninterruptibly(1, TimeUnit.SECONDS);
 			return true;
 		default:
-			throw new AssertionError(
-					DatabaseDescriptor.getCommitFailurePolicy());
+			throw new AssertionError(DatabaseDescriptor.getCommitFailurePolicy());
 		}
+	}
+
+	@Override
+	public boolean isEmpty() {
+		// Placeholder method to avoid exposing FlashCommitlog to
+		// ColumFamilyStore
+		return false;
+	}
+
+	@Override
+	public boolean isAvailable() {
+		// TODO Auto-generated method stub
+		return true;
 	}
 
 }

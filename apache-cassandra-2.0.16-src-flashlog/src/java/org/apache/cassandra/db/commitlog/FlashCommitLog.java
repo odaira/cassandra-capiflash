@@ -55,6 +55,7 @@ import com.ibm.research.capiblock.Chunk;
  */
 public class FlashCommitLog implements ICommitLog {
 	// TUNABLES
+
 	static int BLOCK_SIZE = 4096;
 	static long START_OFFSET = DatabaseDescriptor.getFlashCommitLogStartOffset();
 	static String[] DEVICES = DatabaseDescriptor.getFlashCommitLogDevices();
@@ -67,7 +68,7 @@ public class FlashCommitLog implements ICommitLog {
 	final BlockingQueue<FlashWorker> queue = new LinkedBlockingQueue<FlashWorker>(flashThreads);
 	final ThreadPoolExecutor exec = (ThreadPoolExecutor) Executors.newFixedThreadPool(flashThreads);
 
-	public volatile FlashSegmentManager fsm;
+	public static volatile FlashSegmentManager fsm;
 
 	protected FlashCommitLog() {
 		try {
@@ -77,6 +78,11 @@ public class FlashCommitLog implements ICommitLog {
 				// Pre allocate workers
 				Chunk chunkl = dev.openChunk(DEVICES[i % DEVICES.length]);
 				queue.add(new FlashWorker(chunkl, bufferSizeinMB));
+			}
+			if (DatabaseDescriptor.getConcurrentWriters() > flashThreads) {
+				// TODO
+				logger.error("Flashthreads should be at least number of concurrentWriters");
+				System.exit(1);
 			}
 			if (DatabaseDescriptor.isCommitlogDebugEnabled()) {
 				new Thread(new Runnable() {
@@ -88,11 +94,20 @@ public class FlashCommitLog implements ICommitLog {
 							} catch (InterruptedException e) {
 								e.printStackTrace();
 							}
+							
 							logger.debug("--> Commitlog Monitor: Queue size:" + queue.size() + " Freelist Size="
 									+ fsm.freelist.size());
 							logger.debug(
 									"--> Commitlog Monitor: Readers Waiting:" + Keyspace.switchLock.getReadLockCount()
-											+ " Writers :" + Keyspace.switchLock.getWriteHoldCount());
+											+ " Writers : " + Keyspace.switchLock.isWriteLocked());
+							logger.debug("SWLock Q length: " + Keyspace.switchLock.getQueueLength());
+							logger.debug("Waiting for signal or switchlock acquire" + fsm.locked.get());
+							logger.debug("Allocate lock: "+ FlashSegmentManager.freelistState.isLocked() + "wQ length: "+FlashSegmentManager.freelistState.getQueueLength());
+							// logger.debug("SWLock Wait Q length:
+							logger.debug("Waiting for signal" + fsm.lockedonWait.get());
+							
+							// "+Keyspace.switchLock.getWaitQueueLength(Keyspace.CLogisEmpty));
+
 						}
 					}
 				}).start();
@@ -111,9 +126,6 @@ public class FlashCommitLog implements ICommitLog {
 	 */
 	public void add(RowMutation rm) {
 		try {
-
-			FlashWorker r = queue.take();
-			r.setMessage(rm);
 			long totalSize = RowMutation.serializer.serializedSize(rm, MessagingService.current_version) + 28;
 			long requiredBlocks = getBlockCount(totalSize);
 			if (requiredBlocks > DatabaseDescriptor.getFlashCommitLogSegmentSizeInBlocks()
@@ -122,6 +134,8 @@ public class FlashCommitLog implements ICommitLog {
 				return;
 			}
 			FlashRecordKeeper adder = fsm.allocate(requiredBlocks, rm);
+			FlashWorker r = queue.take();
+			r.setMessage(rm);
 			adder.setSize((int) totalSize);
 			r.setOffset(adder);
 			queue.add((FlashWorker) exec.submit(r).get());// wait to finish
@@ -143,6 +157,7 @@ public class FlashCommitLog implements ICommitLog {
 	 *            the replay position of the flush
 	 */
 	public void discardCompletedSegments(UUID cfId, final ReplayPosition context) {
+		FlashSegmentManager.freelistState.lock();
 		// Go thru the active segment files, which are ordered oldest to
 		// newest, marking the
 		// flushed CF as clean, until we reach the segment file
@@ -173,6 +188,7 @@ public class FlashCommitLog implements ICommitLog {
 				break;
 			}
 		}
+		FlashSegmentManager.freelistState.unlock();
 	}
 
 	/**
@@ -237,4 +253,11 @@ public class FlashCommitLog implements ICommitLog {
 		return flashThreads - queue.size();
 	}
 
+	public boolean isEmpty() {
+		return fsm.lockedonWait.get() > 0;
+	}
+	
+	public boolean isAvailable(){
+		return !fsm.freelist.isEmpty();
+	}
 }
