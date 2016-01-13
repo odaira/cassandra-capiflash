@@ -107,11 +107,14 @@ public class FlashSegmentManager {
 		t.scheduleAtFixedRate(new TimerTask() {
 			public void run() {
 				if(freelist.isEmpty()){
+					freelistState.lock();
 					logger.debug("Entering into big emergency state!!!!!!");
 					List<FlashSegment> segmentsToRecycle = new ArrayList<>();
 					for (FlashSegment segment : activeSegments) {
 						segmentsToRecycle.add(segment);
 					}
+					flushOldestKeyspaces(segmentsToRecycle);
+					freelistState.unlock();
 				}
 				else if (freelist.size() < (double) MAX_SEGMENTS * flush_threshold || FlashCommitLog.instance.hasWaiters()) {
 					if (((JMXEnabledThreadPoolExecutor) ColumnFamilyStore.postFlushExecutor)
