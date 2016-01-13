@@ -785,10 +785,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean {
 			};
 			Future<?> postflush = postFlushExecutor.submit(wrap);
 			try {
-				if (CommitLogHelper.instance.isEmpty() || !CommitLogHelper.instance.isAvailable()) {
+				if (CommitLogHelper.instance.isEmpty() || CommitLogHelper.instance.hasWaiters()) {
 					postflush.get();
-					if (CommitLogHelper.instance.isAvailable()) {
-						logger.error("SIGNALLING !!!!");
+					if (!CommitLogHelper.instance.isEmpty() && CommitLogHelper.instance.hasWaiters()) {
 						Keyspace.CLogisEmpty.signalAll();
 					}
 				}

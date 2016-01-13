@@ -25,6 +25,6 @@ public interface ICommitLog {
 
 	boolean isEmpty();
 
-	boolean isAvailable();
-		
+	boolean hasWaiters();
+
 }

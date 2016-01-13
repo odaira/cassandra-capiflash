@@ -90,7 +90,7 @@ public class FlashCommitLog implements ICommitLog {
 					public void run() {
 						while (true) {
 							try {
-								Thread.sleep(5000);
+								Thread.sleep(2000);
 							} catch (InterruptedException e) {
 								e.printStackTrace();
 							}
@@ -254,10 +254,10 @@ public class FlashCommitLog implements ICommitLog {
 	}
 
 	public boolean isEmpty() {
-		return fsm.lockedonWait.get() > 0;
+		return fsm.freelist.isEmpty();
 	}
 	
-	public boolean isAvailable(){
-		return !fsm.freelist.isEmpty();
+	public boolean hasWaiters(){
+		return fsm.lockedonWait.get() != 0;
 	}
 }
