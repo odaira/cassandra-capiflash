@@ -416,9 +416,8 @@ public class CommitLog implements CommitLogMBean, ICommitLog {
 	}
 
 	@Override
-	public boolean isAvailable() {
-		// TODO Auto-generated method stub
-		return true;
+	public boolean hasWaiters() {
+		return false;
 	}
 
 }

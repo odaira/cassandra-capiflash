@@ -1424,4 +1424,12 @@ public class DatabaseDescriptor {
 		String arch = System.getProperty("os.arch");
 		return arch.contains("64") || arch.contains("sparcv9");
 	}
+
+	public static double getFlashCommitLogFlushThresHold() {
+		return conf.capiflashlog_flush_threshold;
+	}
+
+	public static long getFlashCommitLogFlushCheckInterval() {
+		return conf.capiflashlog_refresh_interval_in_seconds*1000;
+	}
 }
