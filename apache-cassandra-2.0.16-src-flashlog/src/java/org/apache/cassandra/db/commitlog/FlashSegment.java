@@ -60,7 +60,7 @@ public class FlashSegment {
 		physical_block_address = pb_id;
 	}
 
-	public synchronized boolean isActive() {
+	public boolean isActive() {
 		return !cfLastWrite.isEmpty();
 	}
 
