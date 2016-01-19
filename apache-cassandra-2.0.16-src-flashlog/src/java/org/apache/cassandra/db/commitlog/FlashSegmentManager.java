@@ -18,6 +18,7 @@
 package org.apache.cassandra.db.commitlog;
 
 import java.io.IOException;
+import java.lang.management.ManagementFactory;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -33,15 +34,19 @@ import java.util.TimerTask;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantLock;
 
 import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
+import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.Memtable;
 import org.apache.cassandra.db.RowMutation;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.Pair;
@@ -72,6 +77,8 @@ public class FlashSegmentManager {
 	volatile FlashSegment active;
 	AtomicInteger locked = new AtomicInteger(0);
 	AtomicInteger lockedonWait = new AtomicInteger(0);
+	static final protected ThreadPoolExecutor flushexecutor = (ThreadPoolExecutor) Executors.newFixedThreadPool(
+			DatabaseDescriptor.getFlushWriters(), new NamedThreadFactory("Commitlog Flush", Thread.MAX_PRIORITY));
 
 	FlashSegmentManager(Chunk chunk) {
 		bookkeeper = chunk;
@@ -106,20 +113,21 @@ public class FlashSegmentManager {
 		Timer t = new Timer();
 		t.scheduleAtFixedRate(new TimerTask() {
 			public void run() {
-				if(freelist.isEmpty()){
-					freelistState.lock();
-					logger.debug("Entering into big emergency state!!!!!!");
-					List<FlashSegment> segmentsToRecycle = new ArrayList<>();
-					for (FlashSegment segment : activeSegments) {
-						segmentsToRecycle.add(segment);
-					}
-					flushOldestKeyspaces(segmentsToRecycle);
-					freelistState.unlock();
-				}
-				else if (freelist.size() < (double) MAX_SEGMENTS * flush_threshold || FlashCommitLog.instance.hasWaiters()) {
-					if (((JMXEnabledThreadPoolExecutor) ColumnFamilyStore.postFlushExecutor)
-							.getPendingTasks() < DatabaseDescriptor.getFlushWriters()) {
-						// If all flush writers are busy we skip
+				if (((JMXEnabledThreadPoolExecutor) Memtable.flushWriter).getActiveCount() < DatabaseDescriptor
+						.getFlushWriters()
+						&& ((JMXEnabledThreadPoolExecutor) ColumnFamilyStore.postFlushExecutor)
+								.getPendingTasks() < 2) {
+					if (freelist.isEmpty()) {
+						freelistState.lock();
+						logger.debug("Entering into big emergency state!!!!!!");
+						List<FlashSegment> segmentsToRecycle = new ArrayList<>();
+						for (FlashSegment segment : activeSegments) {
+							segmentsToRecycle.add(segment);
+						}
+						flushOldestKeyspaces(segmentsToRecycle);
+						freelistState.unlock();
+					} else if (freelist.size() < (double) MAX_SEGMENTS * flush_threshold
+							|| FlashCommitLog.instance.hasWaiters()) {
 						logger.debug("Background flush : " + freelist.size());
 						freelistState.lock();
 						List<FlashSegment> segmentsToRecycle = new ArrayList<>();
@@ -127,6 +135,12 @@ public class FlashSegmentManager {
 						flushOldestKeyspaces(segmentsToRecycle);
 						freelistState.unlock();
 					}
+				} else {
+					logger.debug("Too many active Flush writer tasks: "
+							+ ((JMXEnabledThreadPoolExecutor) Memtable.flushWriter).getActiveCount());
+					logger.debug("Pending postflush tasks: "
+							+ ((JMXEnabledThreadPoolExecutor) ColumnFamilyStore.postFlushExecutor)
+							.getPendingTasks());
 				}
 			}
 		}, 0, DatabaseDescriptor.getFlashCommitLogFlushCheckInterval());
@@ -136,19 +150,6 @@ public class FlashSegmentManager {
 		Integer segid = null;
 		try {
 			segid = freelist.take();
-			// this is the last segment
-			if (freelist.isEmpty()) {
-				// do not accept any more writes
-				logger.debug("Entering into big emergency state!!!!!!");
-				List<FlashSegment> segmentsToRecycle = new ArrayList<>();
-				for (FlashSegment segment : activeSegments) {
-					if (segment == active)
-						break;
-					segmentsToRecycle.add(segment);
-				}
-				flushOldestKeyspaces(segmentsToRecycle);
-
-			}
 		} catch (InterruptedException e1) {
 			e1.printStackTrace();
 		}
@@ -192,17 +193,18 @@ public class FlashSegmentManager {
 							// CL executor (via getContext),
 							// causing deadlock
 							flushes.add(dirtyCFId);
+							logger.debug("Scheduling " + cfs.name + " for flushing");
 							Runnable runnable = new Runnable() {
 								public void run() {
 									logger.debug("Flushing oldest: " + cfs.name);
 									cfs.forceFlush();
 								}
 							};
-							StorageService.optionalTasks.execute(runnable);
+							flushexecutor.submit(runnable);
 						}
 					}
-				}else{
-					logger.debug("Segment in use or null");
+				} else {
+					logger.debug("Segment in use or null" + oldestSegment.id);
 					break;
 				}
 			}

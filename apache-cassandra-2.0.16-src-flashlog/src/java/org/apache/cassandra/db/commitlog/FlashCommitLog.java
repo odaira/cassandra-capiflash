@@ -80,7 +80,6 @@ public class FlashCommitLog implements ICommitLog {
 				queue.add(new FlashWorker(chunkl, bufferSizeinMB));
 			}
 			if (DatabaseDescriptor.getConcurrentWriters() > flashThreads) {
-				// TODO
 				logger.error("Flashthreads should be at least number of concurrentWriters");
 				System.exit(1);
 			}
@@ -95,19 +94,16 @@ public class FlashCommitLog implements ICommitLog {
 								e.printStackTrace();
 							}
 							
-							logger.debug("--> Commitlog Monitor: Queue size:" + queue.size() + " Freelist Size="
+							logger.debug("--> Commitlog Monitor:Flash Worker Available Workers:" + queue.size() + " Freelist Size="
 									+ fsm.freelist.size());
 							logger.debug(
 									"--> Commitlog Monitor: Readers Waiting:" + Keyspace.switchLock.getReadLockCount()
-											+ " Writers : " + Keyspace.switchLock.isWriteLocked());
-							logger.debug("SWLock Q length: " + Keyspace.switchLock.getQueueLength());
-							logger.debug("Waiting for signal or switchlock acquire" + fsm.locked.get());
-							logger.debug("Allocate lock: "+ FlashSegmentManager.freelistState.isLocked() + "wQ length: "+FlashSegmentManager.freelistState.getQueueLength());
-							// logger.debug("SWLock Wait Q length:
-							logger.debug("Waiting for signal" + fsm.lockedonWait.get());
-							
-							// "+Keyspace.switchLock.getWaitQueueLength(Keyspace.CLogisEmpty));
-
+											+ " Is Write Locked:" + Keyspace.switchLock.isWriteLocked());
+							logger.debug("Commitlog Monitor:Switchlock queue length: " + Keyspace.switchLock.getQueueLength());
+							logger.debug("Commitlog Monitor:Waiting for signal or switchlock acquire" + fsm.locked.get());
+							logger.debug("Commitlog Monitor:FlashCommitlog internal lock: "+ FlashSegmentManager.freelistState.isLocked() + "Threads waiting to acquire lock: "+FlashSegmentManager.freelistState.getQueueLength());
+							logger.debug("Commitlog Monitor:Waiting for signal" + fsm.lockedonWait.get());
+							logger.debug("Commitlog Monitor:Flush Executor Active Tasks:"+FlashSegmentManager.flushexecutor.getActiveCount() + " Flush Executor Queue Size:" +  FlashSegmentManager.flushexecutor.getQueue().size());
 						}
 					}
 				}).start();
@@ -179,7 +175,7 @@ public class FlashCommitLog implements ICommitLog {
 					fsm.recycleSegment(segment);
 				} else {
 					logger.debug("Not safe to delete commit log segment {}; dirty is {} ",
-							segment.physical_block_address, "  dirty:", segment.dirtyString());
+							segment.physical_block_address, segment.dirtyString());
 				}
 			} else {
 				logger.debug("Not deleting active commitlog segment {} ", segment.physical_block_address);

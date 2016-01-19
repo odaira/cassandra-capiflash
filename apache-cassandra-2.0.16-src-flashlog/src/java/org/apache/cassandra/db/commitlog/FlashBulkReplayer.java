@@ -62,7 +62,7 @@ import com.ibm.research.capiblock.Chunk;
 public class FlashBulkReplayer {
 	private static int BULK_BLOCKS_TO_READ = 8000;// 32 MB pieces
 	static final Logger logger = LoggerFactory.getLogger(FlashBulkReplayer.class);
-	private static final int MAX_OUTSTANDING_REPLAY_COUNT = 1024 * 1024; // this
+	private static final int MAX_OUTSTANDING_REPLAY_COUNT = 1024; // this
 																			// is
 																			// 1024
 																			// by
