@@ -238,19 +238,25 @@ capiflashlog_devices:
 capiflashlog_start_offset: 0
 
 #Number of worker threads serializing and making synchronous calls to capi device
-capiflashlog_threads: 64
+capiflashlog_threads: 128
 
 #number of logical segments
-capiflashlog_number_of_segments: 128
+capiflashlog_number_of_segments: 256
 
 #records for each segment
-capiflashlog_segments_size_in_blocks: 32000
+capiflashlog_segments_size_in_blocks: 64000
 
 #size of the buffer allocated in each worker thread. this also checks max request size
 capiflashlog_threads_buffer_size_in_mb: 1
 
-#emergency valve for flushing old commitlog segments. Flashcommitlog triggers flush when there is less than 0.2 segments left on flash
-capiflashlog_emergency_valve: 0.2
+#if size of freelist goes below this value initiates flush
+capiflashlog_flush_threshold: 0.3
+
+#refresh rate for the timer task checking freelist status
+capiflashlog_refresh_interval_in_seconds: 2
+
+#Starts a back ground thread to collect commitlog metrics -  default false
+capiflashlog_debug_enabled: true
 
 # commitlog_sync may be either "periodic" or "batch." 
 # 
@@ -305,9 +311,9 @@ seed_provider:
 # On the other hand, since writes are almost never IO bound, the ideal
 # number of "concurrent_writes" is dependent on the number of cores in
 # your system; (8 * number_of_cores) is a good rule of thumb.
-concurrent_reads: 32
-concurrent_writes: 32
-concurrent_counter_writes: 32
+concurrent_reads: 128
+concurrent_writes: 128
+concurrent_counter_writes: 128
 
 # Total memory to use for sstable-reading buffers.  Defaults to
 # the smaller of 1/4 of heap or 512MB.
@@ -355,7 +361,7 @@ memtable_allocation_type: heap_buffers
 # 
 # If your data directories are backed by SSD, you should increase this
 # to the number of cores.
-#memtable_flush_writers: 8
+memtable_flush_writers: 8
 
 # A fixed memory pool size in MB for for SSTable index summaries. If left
 # empty, this will default to 5% of the heap size. If the memory usage of
