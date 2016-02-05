@@ -68,20 +68,22 @@ public class FlashCommitLog implements ICommitLog {
 				Chunk chunkl = dev.openChunk(DEVICES[i % DEVICES.length]);
 				queue.add(new FlashWorker(chunkl, bufferSizeinMB));
 			}
-			new Thread(new Runnable() {
-				@Override
-				public void run() {
-					while (true) {
-						try {
-							Thread.sleep(5000);
-						} catch (InterruptedException e) {
-							e.printStackTrace();
+			if (DatabaseDescriptor.isCommitlogDebugEnabled()) {
+				new Thread(new Runnable() {
+					@Override
+					public void run() {
+						while (true) {
+							try {
+								Thread.sleep(3000);
+							} catch (InterruptedException e) {
+								e.printStackTrace();
+							}
+							logger.debug("--> Commitlog Monitor: Queue size:" + queue.size());
+							logger.debug("--> Commitlog Monitor: Freelist size:" + fsm.freelist.size());
 						}
-						logger.debug("--> Commitlog Monitor: Queue size:" + queue.size());
-						logger.debug("--> Commitlog Monitor: Freelist size:" + fsm.freelist.size());
 					}
-				}
-			}).start();
+				}).start();
+			}
 		} catch (IOException e1) {
 			e1.printStackTrace();
 		}
@@ -97,8 +99,6 @@ public class FlashCommitLog implements ICommitLog {
 	public ReplayPosition add(Mutation rm) {
 		assert rm != null;
 		try {
-			FlashWorker r = queue.take();
-			r.setMessage(rm);
 			long totalSize = Mutation.serializer.serializedSize(rm, MessagingService.current_version) + 28;
 			long requiredBlocks = getBlockCount(totalSize);
 			if (requiredBlocks > DatabaseDescriptor.getFlashCommitLogSegmentSizeInBlocks()
@@ -108,12 +108,14 @@ public class FlashCommitLog implements ICommitLog {
 								DatabaseDescriptor.getFlashCommitLogThreadBufferSizeinMB() * (256)));
 			}
 			FlashRecordKeeper adder = fsm.allocate(requiredBlocks, rm);
+			FlashWorker r = queue.take();
+			r.setMessage(rm);
 			adder.setSize((int) totalSize);
 			r.setOffset(adder);
-			FlashWorker returnv = (FlashWorker) exec.submit(r).get(3000, TimeUnit.MILLISECONDS);
+			FlashWorker returnv = (FlashWorker) exec.submit(r).get();
 			queue.add(returnv);// wait to finishs
 			return new ReplayPosition(adder.getSegmentID(), (int) (adder.getStartBlock() + adder.getRequiredBlocks()));
-		} catch (InterruptedException | ExecutionException | TimeoutException e) {
+		} catch (InterruptedException | ExecutionException e) {
 			logger.debug("!!!!!!!!!!!!!!Writing to capiblock taking so long !!!!!!!!");
 			System.exit(1);
 			e.printStackTrace();
@@ -141,7 +143,6 @@ public class FlashCommitLog implements ICommitLog {
 		// in the arguments. Any segments that become unused after they
 		// are marked clean will be
 		// recycled or discarded
-
 		logger.debug("discard completed log segments for {}, column family {}", context, cfId);
 		for (Iterator<FlashSegment> iter = fsm.getActiveSegments().iterator(); iter.hasNext();) {
 			FlashSegment segment = iter.next();
@@ -167,7 +168,9 @@ public class FlashCommitLog implements ICommitLog {
 				break;
 			}
 		}
-		logger.debug("Worker Queue Size:" + queue.size() + " Items in freelist:" + fsm.freelist.size());
+		if (fsm.hasAvailableSegments.hasWaiters() && !fsm.freelist.isEmpty()) {
+			fsm.hasAvailableSegments.signalAll();
+		}
 	}
 
 	/**

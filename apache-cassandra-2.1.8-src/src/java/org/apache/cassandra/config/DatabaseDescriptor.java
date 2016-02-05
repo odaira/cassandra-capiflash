@@ -1305,11 +1305,18 @@ public class DatabaseDescriptor {
 	public static long getFlashCommitLogStartOffset() {
 		return conf.capiflashlog_start_offset;
 	}
-
-	public static double getFlashCommitLogEmergencyValve() {
-		return conf.capiflashlog_emergency_valve;
+	public static boolean isCommitlogDebugEnabled() {
+		return conf.capiflashlog_debug_enabled;
+	}
+	
+	public static double getFlashCommitLogFlushThresHold() {
+		return conf.capiflashlog_flush_threshold;
 	}
 
+	public static long getFlashCommitLogFlushCheckInterval() {
+		return conf.capiflashlog_refresh_interval_in_seconds*1000;
+	}
+	
 	public static int getFlashCommitLogThreadBufferSizeinMB() {
 		return conf.capiflashlog_threads_buffer_size_in_mb;
 	}

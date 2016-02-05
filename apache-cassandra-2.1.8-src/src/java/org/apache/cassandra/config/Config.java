@@ -173,7 +173,9 @@ public class Config
     public int capiflashlog_number_of_segments;
     public int capiflashlog_segments_size_in_blocks;
     public int capiflashlog_threads_buffer_size_in_mb;
-    public Double capiflashlog_emergency_valve;
+    public boolean capiflashlog_debug_enabled = false;
+    public double capiflashlog_flush_threshold = 0.2;
+    public int capiflashlog_refresh_interval_in_seconds=2;
 
     
     @Deprecated
