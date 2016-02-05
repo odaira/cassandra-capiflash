@@ -84,7 +84,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 {
     private static final Logger logger = LoggerFactory.getLogger(ColumnFamilyStore.class);
 
-    private static final ExecutorService flushExecutor = new JMXEnabledThreadPoolExecutor(DatabaseDescriptor.getFlushWriters(),
+    public static final ExecutorService flushExecutor = new JMXEnabledThreadPoolExecutor(DatabaseDescriptor.getFlushWriters(),
                                                                                           StageManager.KEEPALIVE,
                                                                                           TimeUnit.SECONDS,
                                                                                           new LinkedBlockingQueue<Runnable>(),
@@ -92,7 +92,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                                                                                           "internal");
 
     // post-flush executor is single threaded to provide guarantee that any flush Future on a CF will never return until prior flushes have completed
-    private static final ExecutorService postFlushExecutor = new JMXEnabledThreadPoolExecutor(1,
+    public static final ExecutorService postFlushExecutor = new JMXEnabledThreadPoolExecutor(1,
                                                                                               StageManager.KEEPALIVE,
                                                                                               TimeUnit.SECONDS,
                                                                                               new LinkedBlockingQueue<Runnable>(),

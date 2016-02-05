@@ -20,6 +20,7 @@ package org.apache.cassandra.db.commitlog;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.Iterator;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutionException;
@@ -27,10 +28,12 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.net.MessagingService;
+import org.mortbay.log.Log;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -54,7 +57,6 @@ public class FlashCommitLog implements ICommitLog {
 	final CapiBlockDevice dev = CapiBlockDevice.getInstance();
 	final BlockingQueue<FlashWorker> queue = new LinkedBlockingQueue<FlashWorker>(flashThreads);
 	final ThreadPoolExecutor exec = (ThreadPoolExecutor) Executors.newFixedThreadPool(flashThreads);
-
 	FlashSegmentManager fsm;
 
 	protected FlashCommitLog() {
@@ -65,6 +67,22 @@ public class FlashCommitLog implements ICommitLog {
 				// Pre allocate workers
 				Chunk chunkl = dev.openChunk(DEVICES[i % DEVICES.length]);
 				queue.add(new FlashWorker(chunkl, bufferSizeinMB));
+			}
+			if (DatabaseDescriptor.isCommitlogDebugEnabled()) {
+				new Thread(new Runnable() {
+					@Override
+					public void run() {
+						while (true) {
+							try {
+								Thread.sleep(3000);
+							} catch (InterruptedException e) {
+								e.printStackTrace();
+							}
+							logger.debug("--> Commitlog Monitor: Queue size:" + queue.size());
+							logger.debug("--> Commitlog Monitor: Freelist size:" + fsm.freelist.size());
+						}
+					}
+				}).start();
 			}
 		} catch (IOException e1) {
 			e1.printStackTrace();
@@ -81,8 +99,6 @@ public class FlashCommitLog implements ICommitLog {
 	public ReplayPosition add(Mutation rm) {
 		assert rm != null;
 		try {
-			FlashWorker r = queue.take();
-			r.setMessage(rm);
 			long totalSize = Mutation.serializer.serializedSize(rm, MessagingService.current_version) + 28;
 			long requiredBlocks = getBlockCount(totalSize);
 			if (requiredBlocks > DatabaseDescriptor.getFlashCommitLogSegmentSizeInBlocks()
@@ -92,19 +108,20 @@ public class FlashCommitLog implements ICommitLog {
 								DatabaseDescriptor.getFlashCommitLogThreadBufferSizeinMB() * (256)));
 			}
 			FlashRecordKeeper adder = fsm.allocate(requiredBlocks, rm);
+			FlashWorker r = queue.take();
+			r.setMessage(rm);
 			adder.setSize((int) totalSize);
 			r.setOffset(adder);
-			queue.add((FlashWorker) exec.submit(r).get());// wait to finish
-			synchronized (queue) {
-				if (queue.size() == flashThreads) {
-					queue.notify();
-				}
-			}
+			FlashWorker returnv = (FlashWorker) exec.submit(r).get();
+			queue.add(returnv);// wait to finishs
 			return new ReplayPosition(adder.getSegmentID(), (int) (adder.getStartBlock() + adder.getRequiredBlocks()));
 		} catch (InterruptedException | ExecutionException e) {
+			logger.debug("!!!!!!!!!!!!!!Writing to capiblock taking so long !!!!!!!!");
+			System.exit(1);
 			e.printStackTrace();
 			return null;
 		}
+
 	}
 
 	/**
@@ -125,46 +142,34 @@ public class FlashCommitLog implements ICommitLog {
 		// containing the ReplayPosition passed
 		// in the arguments. Any segments that become unused after they
 		// are marked clean will be
-		// recycled or discarded.
-
-		synchronized (queue) {
-			while (queue.size() != flashThreads) {
-				try {
-					long startTime = System.currentTimeMillis();
-					queue.wait();
-					long estimatedTime = System.currentTimeMillis() - startTime;
-					logger.debug("------------------------>" + " wait miliseconds " + estimatedTime);
-				} catch (InterruptedException e) {
-					e.printStackTrace();
-				}
-			}
-
-			logger.debug("discard completed log segments for {}, column family {}", context, cfId);
-			for (Iterator<FlashSegment> iter = fsm.getActiveSegments().iterator(); iter.hasNext();) {
-				FlashSegment segment = iter.next();
-				segment.markClean(cfId, context);
-				// If the segment is no longer needed, and we have another
-				// spare segment in the hopper
-				// (to keep the last segment from getting discarded), pursue
-				// either recycling or deleting
-				// this segment file.
-				if (iter.hasNext()) {
-					if (segment.isUnused()) {
-						logger.debug("Commit log segment {} is unused ", segment.physical_block_address);
-						fsm.recycleSegment(segment);
-					} else {
-						logger.debug("Not safe to delete commit log segment {}; dirty is {} ",
-								segment.physical_block_address, segment.dirtyString());
-					}
+		// recycled or discarded
+		logger.debug("discard completed log segments for {}, column family {}", context, cfId);
+		for (Iterator<FlashSegment> iter = fsm.getActiveSegments().iterator(); iter.hasNext();) {
+			FlashSegment segment = iter.next();
+			segment.markClean(cfId, context);
+			// If the segment is no longer needed, and we have another
+			// spare segment in the hopper
+			// (to keep the last segment from getting discarded), pursue
+			// either recycling or deleting
+			// this segment file.
+			if (iter.hasNext()) {
+				if (segment.isUnused()) {
+					logger.debug("Commit log segment {} is unused ", segment.physical_block_address);
+					fsm.recycleSegment(segment);
 				} else {
-					logger.debug("Not deleting active commitlog segment {} ", segment.physical_block_address);
+					logger.debug("Not safe to delete commit log segment {}; dirty is {} ",
+							segment.physical_block_address, segment.dirtyString());
 				}
-				if (segment.contains(context)) {
-					logger.debug("Segment " + segment.id + " contains the context");
-					break;
-				}
+			} else {
+				logger.debug("Not deleting active commitlog segment {} ", segment.physical_block_address);
 			}
-			logger.debug("Worker Queue Size:"+queue.size()+" Items in freelist:"+fsm.freelist.size());
+			if (segment.contains(context)) {
+				logger.debug("Segment " + segment.id + " contains the context");
+				break;
+			}
+		}
+		if (fsm.hasAvailableSegments.hasWaiters() && !fsm.freelist.isEmpty()) {
+			fsm.hasAvailableSegments.signalAll();
 		}
 	}
 

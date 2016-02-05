@@ -44,10 +44,11 @@
     </encoder>
   </appender>
         
-  <root level="INFO">
+  <root level="ERROR">
     <appender-ref ref="FILE" />
     <appender-ref ref="STDOUT" />
   </root>
   
   <logger name="com.thinkaurelius.thrift" level="ERROR"/>
+  <logger name="org.apache.cassandra.db.commitlog" level="DEBUG"/>
 </configuration>
