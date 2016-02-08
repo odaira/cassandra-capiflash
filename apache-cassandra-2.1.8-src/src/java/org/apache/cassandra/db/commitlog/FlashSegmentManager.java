@@ -28,35 +28,52 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Timer;
+import java.util.TimerTask;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 
+import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
+import org.apache.cassandra.concurrent.NamedThreadFactory;
+import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.Memtable;
 import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.metrics.DefaultNameFactory;
 import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.concurrent.WaitQueue;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.ibm.research.capiblock.Chunk;
+import com.yammer.metrics.Metrics;
 
 /**
  * @author bsendir
  *
  */
 public class FlashSegmentManager {
+
+	static final ReentrantLock allocationLock = new ReentrantLock();
+	final WaitQueue hasAvailableSegments = new WaitQueue();
 	static final Logger logger = LoggerFactory.getLogger(FlashSegmentManager.class);
 	public static int MAX_SEGMENTS = DatabaseDescriptor.getFlashCommitLogNumberOfSegments();
 	public static int BLOCKS_IN_SEG = DatabaseDescriptor.getFlashCommitLogSegmentSizeInBlocks();
-	public static double EMERGENCY_VALVE = DatabaseDescriptor.getFlashCommitLogEmergencyValve();
-	private final BlockingQueue<Integer> freelist = new LinkedBlockingQueue<Integer>(MAX_SEGMENTS);
+	public static double flush_threshold = DatabaseDescriptor.getFlashCommitLogFlushThresHold();
+	public final BlockingQueue<Integer> freelist = new LinkedBlockingQueue<Integer>(MAX_SEGMENTS);
 	private final ConcurrentLinkedQueue<FlashSegment> activeSegments = new ConcurrentLinkedQueue<FlashSegment>();
 	ByteBuffer util = ByteBuffer.allocateDirect(1024 * 4);// utility buffer for
 															// bookkeping
@@ -64,6 +81,9 @@ public class FlashSegmentManager {
 	HashMap<Integer, Long> unCommitted;
 	Chunk bookkeeper = null;
 	volatile FlashSegment active;
+
+	static final protected ThreadPoolExecutor flushscheduler = (ThreadPoolExecutor) Executors.newFixedThreadPool(
+			DatabaseDescriptor.getFlushWriters(), new NamedThreadFactory("Commitlog Flush", Thread.MAX_PRIORITY));
 
 	FlashSegmentManager(Chunk chunk) {
 		bookkeeper = chunk;
@@ -92,15 +112,68 @@ public class FlashSegmentManager {
 			}
 		}
 		activateNextSegment();
+		startBackgroundThread();
+	}
+
+	private void startBackgroundThread() {
+		Timer t = new Timer();
+		t.scheduleAtFixedRate(new TimerTask() {
+			public void run() {
+				if (hasAvailableSegments.hasWaiters() && !freelist.isEmpty()) {
+					hasAvailableSegments.signalAll();
+				}
+				if (((JMXEnabledThreadPoolExecutor) ColumnFamilyStore.flushExecutor)
+						.getActiveCount() < DatabaseDescriptor.getFlushWriters()
+						&& ((JMXEnabledThreadPoolExecutor) ColumnFamilyStore.postFlushExecutor).getPendingTasks() < 2) {
+					if (freelist.isEmpty()) {
+						logger.debug("Entering into big emergency state!!!!!!");
+						final List<FlashSegment> segmentsToRecycle = new ArrayList<>();
+						for (FlashSegment segment : getActiveSegments()) {
+							segmentsToRecycle.add(segment);
+						}
+						flushscheduler.submit(new Runnable() {
+							public void run() {
+								Future<?> futures = flushDataFrom(segmentsToRecycle, true);
+								try {
+									futures.get();
+								} catch (InterruptedException | ExecutionException e) {
+									// TODO Auto-generated catch block
+									e.printStackTrace();
+								}
+
+							}
+						});
+					} else if (freelist.size() < (double) MAX_SEGMENTS * flush_threshold) {
+						logger.debug("Background flush : " + freelist.size());
+						final List<FlashSegment> segmentsToRecycle = new ArrayList<>();
+						segmentsToRecycle.add(activeSegments.peek());
+						flushscheduler.submit(new Runnable() {
+							public void run() {
+								Future<?> futures = flushDataFrom(segmentsToRecycle, true);
+								try {
+									futures.get();
+								} catch (InterruptedException | ExecutionException e) {
+									// TODO Auto-generated catch block
+									e.printStackTrace();
+								}
+							}
+						});
+					}
+				} else {
+					logger.debug("Too many active Flush writer tasks "
+							+ ((JMXEnabledThreadPoolExecutor) ColumnFamilyStore.flushExecutor).getActiveCount());
+					logger.debug("Pending postflush tasks "
+							+ ((JMXEnabledThreadPoolExecutor) ColumnFamilyStore.postFlushExecutor).getPendingTasks());
+				}
+			}
+		}, 0, DatabaseDescriptor.getFlashCommitLogFlushCheckInterval());
 	}
 
 	private void activateNextSegment() {
-		if (freelist.size() < MAX_SEGMENTS * EMERGENCY_VALVE) {
-			logger.debug("!!!!!!!----------!!!!!!!!!!--------!!!!!!!\nEmergency valve in action flushing oldest....");
-			flushOldestKeyspaces();
-		}
+		Integer segid;
 		try {
-			active = new FlashSegment(freelist.take());
+			segid = freelist.take();
+			active = new FlashSegment(segid);
 			try {
 				ByteBuffer buf = ByteBuffer.allocateDirect(1024 * 4);
 				logger.debug("Activating " + active.getID() + " with PB:" + active.getPB() + " --> "
@@ -111,43 +184,21 @@ public class FlashSegmentManager {
 				e.printStackTrace();
 			}
 			activeSegments.add(active);
-		} catch (InterruptedException e) {
-			e.printStackTrace();
+		} catch (InterruptedException e1) {
+			// TODO Auto-generated catch block
+			e1.printStackTrace();
 		}
 	}
 
-	private void flushOldestKeyspaces() {
-		{
-			FlashSegment oldestSegment = activeSegments.peek();
-			if (oldestSegment != null && oldestSegment != this.active) {
-				for (UUID dirtyCFId : oldestSegment.getDirtyCFIDs()) {
-					Pair<String, String> pair = Schema.instance.getCF(dirtyCFId);
-					if (pair == null) {
-						// even though we remove the schema entry before a final
-						// flush when dropping a CF,
-						// it's still possible for a writer to race and finish
-						// his append after the flush.
-						logger.debug("Marking clean CF {} that doesn't exist anymore", dirtyCFId);
-						oldestSegment.markClean(dirtyCFId, oldestSegment.getContext());
-					} else {
-						String keypace = pair.left;
-						final ColumnFamilyStore cfs = Keyspace.open(keypace).getColumnFamilyStore(dirtyCFId);
-						cfs.forceFlush();
-					}
-				}
-			}
-		}
-	}
-
-	synchronized void recycleSegment(final FlashSegment segment) {
+	void recycleSegment(final FlashSegment segment) {
 		activeSegments.remove(segment);
 		try {
-			logger.debug("Recycling "+segment.getID());
+			logger.debug("Recycling " + segment.getID());
 			util.putLong(0);
 			bookkeeper.writeBlock(FlashCommitLog.START_OFFSET + segment.getPB(), 1, util);
 			util.clear();
-			freelist.put((int) segment.getPB());
-		} catch (InterruptedException | IOException e) {
+			freelist.add((int) segment.getPB());
+		} catch (IOException e) {
 			e.printStackTrace();
 		}
 	}
@@ -156,12 +207,22 @@ public class FlashSegmentManager {
 		return Collections.unmodifiableCollection(activeSegments);
 	}
 
-	synchronized FlashRecordKeeper allocate(long num_blocks, Mutation rm) {
+	FlashRecordKeeper allocate(long num_blocks, Mutation rm) {
+		allocationLock.lock();
 		if (active == null || !active.hasCapacityFor(num_blocks)) {
+			while (freelist.isEmpty()) {
+				hasAvailableSegments.register(Metrics
+						.newTimer(new DefaultNameFactory("CommitLog").createMetricName("WaitingOnSegmentAllocation"),
+								TimeUnit.MICROSECONDS, TimeUnit.SECONDS)
+						.time()).awaitUninterruptibly();
+			}
 			activateNextSegment();
 		}
 		active.markDirty(rm, active.getContext());
-		return new FlashRecordKeeper(num_blocks, active.getandAddPosition(num_blocks), active.getID());
+		final FlashRecordKeeper offset = new FlashRecordKeeper(num_blocks, active.getandAddPosition(num_blocks),
+				active.getID());
+		allocationLock.unlock();
+		return offset;
 	}
 
 	/**
@@ -173,9 +234,10 @@ public class FlashSegmentManager {
 				util.clear();
 				util.putLong(0);
 				bookkeeper.writeBlock(FlashCommitLog.START_OFFSET + key, 1, util);
-				freelist.put(key);
+				freelist.add(key);
+				hasAvailableSegments.signalAll();
 				logger.debug("Recycle after replay activating: " + key);
-			} catch (IOException | InterruptedException e) {
+			} catch (IOException e) {
 				e.printStackTrace();
 			}
 		}
@@ -186,11 +248,9 @@ public class FlashSegmentManager {
 		if (segments.isEmpty())
 			return Futures.immediateFuture(null);
 		final ReplayPosition maxReplayPosition = segments.get(segments.size() - 1).getContext();
-
 		// a map of CfId -> forceFlush() to ensure we only queue one flush per
 		// cf
 		final Map<UUID, ListenableFuture<?>> flushes = new LinkedHashMap<>();
-
 		for (FlashSegment segment : segments) {
 			for (UUID dirtyCFId : segment.getDirtyCFIDs()) {
 				Pair<String, String> pair = Schema.instance.getCF(dirtyCFId);
@@ -207,6 +267,7 @@ public class FlashSegmentManager {
 					// can safely call forceFlush here as we will only ever
 					// block (briefly) for other attempts to flush,
 					// no deadlock possibility since switchLock removal
+					logger.debug("Flushing " + dirtyCFId);
 					flushes.put(dirtyCFId, force ? cfs.forceFlush() : cfs.forceFlush(maxReplayPosition));
 				}
 			}
@@ -218,24 +279,9 @@ public class FlashSegmentManager {
 	public void forceRecycleAll(Iterable<UUID> droppedCfs) {
 		List<FlashSegment> segmentsToRecycle = new ArrayList<>(activeSegments);
 		FlashSegment last = segmentsToRecycle.get(segmentsToRecycle.size() - 1);
-		synchronized (this) {
-			activateNextSegment();
-		}
-
-		synchronized (FlashCommitLog.instance.queue) {
-			while (FlashCommitLog.instance.queue.size() != FlashCommitLog.instance.flashThreads) {
-				try {
-					long startTime = System.currentTimeMillis();
-					// logger.error("deadlock !!!!");
-					FlashCommitLog.instance.queue.wait();
-					long estimatedTime = System.currentTimeMillis() - startTime;
-					logger.error("------------------------>" + " release Wait miliseconds " + estimatedTime);
-				} catch (InterruptedException e) {
-					e.printStackTrace();
-				}
-			}
-		}
-
+		allocationLock.lock();
+		activateNextSegment();
+		allocationLock.unlock();
 		// make sure the writes have materialized inside of the memtables by
 		// waiting for all outstanding writes
 		// on the relevant keyspaces to complete
