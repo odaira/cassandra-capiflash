@@ -38,6 +38,11 @@ import java.util.concurrent.TimeUnit;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.RowMutation;
+import org.apache.cassandra.db.commitlog.capi.AsyncChunkManager;
+import org.apache.cassandra.db.commitlog.capi.BufferAllocationStrategy;
+import org.apache.cassandra.db.commitlog.capi.CheckSummedBuffer;
+import org.apache.cassandra.db.commitlog.capi.ChunkManagerInterface;
+import org.apache.cassandra.db.commitlog.capi.FixedSizeAllocationStrategy;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.FBUtilities;
 import org.slf4j.Logger;
@@ -59,30 +64,20 @@ public class FlashCommitLog implements ICommitLog {
 	static int BLOCK_SIZE = 4096;
 	static long START_OFFSET = DatabaseDescriptor.getFlashCommitLogStartOffset();
 	static String[] DEVICES = DatabaseDescriptor.getFlashCommitLogDevices();
-	static int flashThreads = DatabaseDescriptor.getFlashCommitLogNumberOfThreads();
 	static int bufferSizeinMB = DatabaseDescriptor.getFlashCommitLogThreadBufferSizeinMB();
 	static long DATA_OFFSET = START_OFFSET + FlashSegmentManager.MAX_SEGMENTS;
 	static final Logger logger = LoggerFactory.getLogger(FlashCommitLog.class);
 	public static final FlashCommitLog instance = new FlashCommitLog();
-	final CapiBlockDevice dev = CapiBlockDevice.getInstance();
-	final BlockingQueue<FlashWorker> queue = new LinkedBlockingQueue<FlashWorker>(flashThreads);
-	final ThreadPoolExecutor exec = (ThreadPoolExecutor) Executors.newFixedThreadPool(flashThreads);
 
 	public static volatile FlashSegmentManager fsm;
+	public static ChunkManagerInterface chunkManager;
+	public static BufferAllocationStrategy bufferAlloc;
 
 	protected FlashCommitLog() {
 		try {
-			Chunk chunk = dev.openChunk(DEVICES[0]);
-			fsm = new FlashSegmentManager(chunk);
-			for (int i = 0; i < flashThreads; i++) {
-				// Pre allocate workers
-				Chunk chunkl = dev.openChunk(DEVICES[i % DEVICES.length]);
-				queue.add(new FlashWorker(chunkl, bufferSizeinMB));
-			}
-			if (DatabaseDescriptor.getConcurrentWriters() > flashThreads) {
-				logger.error("Flashthreads should be at least number of concurrentWriters");
-				System.exit(1);
-			}
+			fsm = new FlashSegmentManager(CapiBlockDevice.getInstance().openChunk(DEVICES[0]));
+			chunkManager = new AsyncChunkManager();// TODO asyncrequests
+			bufferAlloc = new FixedSizeAllocationStrategy(); //TODO parameterize
 			if (DatabaseDescriptor.isCommitlogDebugEnabled()) {
 				new Thread(new Runnable() {
 					@Override
@@ -93,17 +88,20 @@ public class FlashCommitLog implements ICommitLog {
 							} catch (InterruptedException e) {
 								e.printStackTrace();
 							}
-							
-							logger.debug("--> Commitlog Monitor:Flash Worker Available Workers:" + queue.size() + " Freelist Size="
-									+ fsm.freelist.size());
 							logger.debug(
 									"--> Commitlog Monitor: Readers Waiting:" + Keyspace.switchLock.getReadLockCount()
 											+ " Is Write Locked:" + Keyspace.switchLock.isWriteLocked());
-							logger.debug("Commitlog Monitor:Switchlock queue length: " + Keyspace.switchLock.getQueueLength());
-							logger.debug("Commitlog Monitor:Waiting for signal or switchlock acquire" + fsm.locked.get());
-							logger.debug("Commitlog Monitor:FlashCommitlog internal lock: "+ FlashSegmentManager.freelistState.isLocked() + "Threads waiting to acquire lock: "+FlashSegmentManager.freelistState.getQueueLength());
+							logger.debug("Commitlog Monitor:Switchlock queue length: "
+									+ Keyspace.switchLock.getQueueLength());
+							logger.debug(
+									"Commitlog Monitor:Waiting for signal or switchlock acquire" + fsm.locked.get());
+							logger.debug("Commitlog Monitor:FlashCommitlog internal lock: "
+									+ FlashSegmentManager.freelistState.isLocked() + "Threads waiting to acquire lock: "
+									+ FlashSegmentManager.freelistState.getQueueLength());
 							logger.debug("Commitlog Monitor:Waiting for signal" + fsm.lockedonWait.get());
-							logger.debug("Commitlog Monitor:Flush Executor Active Tasks:"+FlashSegmentManager.flushexecutor.getActiveCount() + " Flush Executor Queue Size:" +  FlashSegmentManager.flushexecutor.getQueue().size());
+							logger.debug("Commitlog Monitor:Flush Executor Active Tasks:"
+									+ FlashSegmentManager.flushexecutor.getActiveCount() + " Flush Executor Queue Size:"
+									+ FlashSegmentManager.flushexecutor.getQueue().size());
 						}
 					}
 				}).start();
@@ -121,24 +119,30 @@ public class FlashCommitLog implements ICommitLog {
 	 * @param
 	 */
 	public void add(RowMutation rm) {
+
+		long totalSize = RowMutation.serializer.serializedSize(rm, MessagingService.current_version) + 28;
+		long requiredBlocks = getBlockCount(totalSize);
+		if (requiredBlocks > DatabaseDescriptor.getFlashCommitLogSegmentSizeInBlocks()
+				|| requiredBlocks > DatabaseDescriptor.getFlashCommitLogThreadBufferSizeinMB() * (256)) {
+			logger.warn("Skipping commitlog append of extremely large mutation Blocks: {}", requiredBlocks);
+			return;
+		}
+		FlashRecordAdder adder = fsm.allocate(requiredBlocks, rm);
+		CheckSummedBuffer buf = null;
+		buf = bufferAlloc.poll(requiredBlocks);
+		// fill the buffer
 		try {
-			long totalSize = RowMutation.serializer.serializedSize(rm, MessagingService.current_version) + 28;
-			long requiredBlocks = getBlockCount(totalSize);
-			if (requiredBlocks > DatabaseDescriptor.getFlashCommitLogSegmentSizeInBlocks()
-					|| requiredBlocks > DatabaseDescriptor.getFlashCommitLogThreadBufferSizeinMB() * (256)) {
-				logger.warn("Skipping commitlog append of extremely large mutation Blocks: {}", requiredBlocks);
-				return;
-			}
-			FlashRecordKeeper adder = fsm.allocate(requiredBlocks, rm);
-			FlashWorker r = queue.take();
-			r.setMessage(rm);
-			adder.setSize((int) totalSize);
-			r.setOffset(adder);
-			queue.add((FlashWorker) exec.submit(r).get());// wait to finish
-		} catch (InterruptedException | ExecutionException e) {
+			buf.getStream().writeLong(adder.getSegmentID());
+			buf.getStream().writeInt((int) totalSize);
+			buf.getBuffer().putLong(buf.getChecksum().getValue());
+			RowMutation.serializer.serialize(rm, buf.getStream(), MessagingService.current_version);
+			buf.getBuffer().putLong(buf.getChecksum().getValue());
+		} catch (IOException e) {
 			e.printStackTrace();
 		}
-
+		// write buffer
+		chunkManager.write(adder.getStartBlock(), adder.getRequiredBlocks(), buf);
+		bufferAlloc.free(buf);
 	}
 
 	/**
@@ -209,20 +213,10 @@ public class FlashCommitLog implements ICommitLog {
 	 * Shuts down the threads used by the commit log, blocking until completion.
 	 */
 	public void shutdownBlocking() {
-		exec.shutdown();
 		try {
-			exec.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
-			Iterator<FlashWorker> it = queue.iterator();
-			while (it.hasNext()) {
-				it.next().closeChunk();
-			}
-			try {
-				fsm.bookkeeper.close();
-			} catch (IOException e) {
-				e.printStackTrace();
-			}
-
-		} catch (InterruptedException e) {
+			chunkManager.closeChunks();
+			fsm.bookkeeper.close();
+		} catch (IOException e) {
 			e.printStackTrace();
 		}
 	}
@@ -246,14 +240,14 @@ public class FlashCommitLog implements ICommitLog {
 	}
 
 	public long getPendingTasks() {
-		return flashThreads - queue.size();
+		return 0;// TODO
 	}
 
 	public boolean isEmpty() {
 		return fsm.freelist.isEmpty();
 	}
-	
-	public boolean hasWaiters(){
+
+	public boolean hasWaiters() {
 		return fsm.lockedonWait.get() != 0;
 	}
 }

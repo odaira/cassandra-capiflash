@@ -18,16 +18,13 @@
 package org.apache.cassandra.db.commitlog;
 
 import java.io.IOException;
-import java.lang.management.ManagementFactory;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.Timer;
 import java.util.TimerTask;
@@ -48,12 +45,10 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Memtable;
 import org.apache.cassandra.db.RowMutation;
-import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.Pair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.google.common.util.concurrent.ListenableFuture;
 import com.ibm.research.capiblock.Chunk;
 
 /**
@@ -249,19 +244,19 @@ public class FlashSegmentManager {
 		}
 	}
 
-	FlashRecordKeeper allocate(long num_blocks, RowMutation rm) {
+	FlashRecordAdder allocate(long num_blocks, RowMutation rm) {
 		freelistState.lock();
 		while (freelist.isEmpty()) {
 			freelistState.unlock();
 			emergencyState();
 			freelistState.lock();
 		}
-		FlashRecordKeeper allocd = null;
+		FlashRecordAdder allocd = null;
 		if (active == null || !active.hasCapacityFor(num_blocks)) {
 			activateNextSegment();
 		}
 		active.markDirty(rm, active.getContext());
-		allocd = new FlashRecordKeeper(num_blocks, active.getandAddPosition(num_blocks), active.getID());
+		allocd = new FlashRecordAdder(num_blocks, active.getandAddPosition(num_blocks), active.getID());
 		freelistState.unlock();
 		return allocd;
 	}
@@ -283,5 +278,4 @@ public class FlashSegmentManager {
 		}
 		unCommitted.clear();
 	}
-
 }

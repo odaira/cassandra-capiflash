@@ -17,31 +17,30 @@
  */
 package org.apache.cassandra.db.commitlog;
 
+import java.nio.ByteBuffer;
+
+import org.apache.cassandra.db.RowMutation;
+import org.apache.cassandra.db.commitlog.capi.CheckSummedBuffer;
+import org.apache.cassandra.net.MessagingService;
+
 /**
- * @author bsendir
- * Utility Class to keep offsets for a record. 
+ * @author bsendir Utility Class to keep offsets for a record.
  *
  */
-//TODO I created this class for easier debugging. We could get rid of this class 
-public class FlashRecordKeeper {
+
+public class FlashRecordAdder {
 	private long startBlock = 0;
-	private int totalSize = 0;
 	private long requiredBlocks = 0;
 	private long segmentID = 0;
 
-	
-	public FlashRecordKeeper(long num_blocks, long pos, long id) {
-		requiredBlocks=num_blocks;
-		segmentID=id;
-		startBlock=pos;
+	public FlashRecordAdder(long num_blocks, long pos, long id) {
+		requiredBlocks = num_blocks;
+		segmentID = id;
+		startBlock = pos;
 	}
 
 	public long getStartBlock() {
 		return startBlock;
-	}
-
-	public int getTotalSize() {
-		return totalSize;
 	}
 
 	public long getRequiredBlocks() {
@@ -52,8 +51,7 @@ public class FlashRecordKeeper {
 		return segmentID;
 	}
 
-	public void setSize(int totalSize2) {
-		totalSize = totalSize2;
-
+	public ByteBuffer getBuffer() {
+		return null;
 	}
 }
