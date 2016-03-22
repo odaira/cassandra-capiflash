@@ -39,6 +39,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.RowMutation;
 import org.apache.cassandra.db.commitlog.capi.AsyncChunkManager;
+import org.apache.cassandra.db.commitlog.capi.AsyncProducerConsumerChunkManager;
 import org.apache.cassandra.db.commitlog.capi.BufferAllocationStrategy;
 import org.apache.cassandra.db.commitlog.capi.CheckSummedBuffer;
 import org.apache.cassandra.db.commitlog.capi.ChunkManagerInterface;
@@ -76,7 +77,8 @@ public class FlashCommitLog implements ICommitLog {
 	protected FlashCommitLog() {
 		try {
 			fsm = new FlashSegmentManager(CapiBlockDevice.getInstance().openChunk(DEVICES[0]));
-			chunkManager = new AsyncChunkManager();// TODO asyncrequests
+			//chunkManager = new AsyncChunkManager();// TODO asyncrequests
+			chunkManager = new AsyncProducerConsumerChunkManager();
 			bufferAlloc = new FixedSizeAllocationStrategy(); //TODO parameterize
 			if (DatabaseDescriptor.isCommitlogDebugEnabled()) {
 				new Thread(new Runnable() {

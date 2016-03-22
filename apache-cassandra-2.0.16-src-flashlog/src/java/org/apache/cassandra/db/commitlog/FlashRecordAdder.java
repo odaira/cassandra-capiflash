@@ -51,7 +51,4 @@ public class FlashRecordAdder {
 		return segmentID;
 	}
 
-	public ByteBuffer getBuffer() {
-		return null;
-	}
 }
