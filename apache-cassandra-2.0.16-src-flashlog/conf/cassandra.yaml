@@ -103,10 +103,10 @@ partitioner: org.apache.cassandra.dht.Murmur3Partitioner
 # will spread data evenly across them, subject to the granularity of
 # the configured compaction strategy.
 data_file_directories:
-    - /var/work/bsendir1/capiflash2.0/temp/data
+    - /var/work/bsendir1/cassandra-data
 
 # commit log
-commitlog_directory: /tmp/capiflash2.0/temp/clog
+commitlog_directory: /var/work/bsendir1/cassandra-log
 
 # policy for data disk failures:
 # stop_paranoid: shut down gossip and Thrift even for single-sstable errors.
@@ -190,8 +190,9 @@ row_cache_save_period: 0
 # memory_allocator: NativeAllocator
 
 # saved caches
-saved_caches_directory: /var/work/bsendir1/capiflash2.0/temp/caches
+saved_caches_directory: /var/work/bsendir1/cassandra-saved
 
+####################
 #CommitLog-CAPIFlashCommitLog
 #Type CommitLog or CAPIFlashCommitLog
 #commitlog_type: CommitLog
@@ -205,7 +206,10 @@ capiflashlog_devices:
 capiflashlog_start_offset: 0
 
 #Number of worker threads serializing and making synchronous calls to capi device
-capiflashlog_threads: 64
+#capiflashlog_threads: 128
+
+#Starts a back ground thread to collect commitlog metrics -  default false
+capiflashlog_debug_enabled : true
 
 #number of logical segments
 capiflashlog_number_of_segments: 128
@@ -213,18 +217,44 @@ capiflashlog_number_of_segments: 128
 #records for each segment
 capiflashlog_segments_size_in_blocks: 32000
 
-#if size of freelist goes below this value initiates flush
-capiflashlog_flush_threshold: 0.3
-
-#refresh rate for the timer task checking freelist status
-capiflashlog_refresh_interval_in_seconds: 2
-
 #size of the buffer allocated in each worker thread. this also checks max request size
-capiflashlog_threads_buffer_size_in_mb: 1
+#capiflashlog_threads_buffer_size_in_mb: 1
 
-#Starts a back ground thread to collect commitlog metrics -  default false
-capiflashlog_debug_enabled: true
+#emergency valve for flushing old commitlog segments. Flashcommitlog triggers flush when there is less than 0.2 segments left on flash
+#capiflashlog_emergency_valve: 0.2
 
+
+#CapiFlashCommitlog - Buffer Allocation#
+#In-progress 
+#capiflashlog_buffer_allocator_type : PooledAllocationStrategy
+
+#Allocates fixed number of buffers with fixed size. 
+#if number of buffers not enough it will busy wait until resource become available
+capiflashlog_buffer_allocator_type : FixedSizeAllocationStrategy
+capiflashlog_preallocated_buffer_size_in_blocks : 256
+capiflashlog_preallocated_buffer_count : 128
+ 
+#CapiFlashCommitlog - Async Chunk Management#
+#number of chunks to be opened
+capiflashlog_number_of_chunks : 128
+
+#number of async call parameters to be passed to the openChunk method 
+#if set 0 capiflash layer decides on the parameter
+capiflashlog_async_calls_per_chunk : 0
+
+#no configurables for this type of chunk manager- each concurrent_writes thread calls writeblockasync and Future.get immediately.
+#capiflashlog_chunkmanager_type : AsyncChunkManager
+   
+#creates number of chunks defined by (capiflashlog_number_of_chunks)
+#implements controls over concurrent_writer threads  
+capiflashlog_chunkmanager_type : AsyncProducerConsumerChunkManager
+#number of concurrent_writes threads allowed to call writeBlockAsync 
+#also sets the size of the blockingqueue which backs the threadpool that consumes Future.get
+capiflashlog_number_of_concurrent_writeBlock : 128
+#max number of consumer threads to consume Future.get() of writeblockAsync calls.
+capiflashlog_numberof_consumer_threads : 32
+
+###################
 
 # commitlog_sync may be either "periodic" or "batch." 
 # When in batch mode, Cassandra won't ack writes until the commit log
@@ -232,8 +262,8 @@ capiflashlog_debug_enabled: true
 # commitlog_sync_batch_window_in_ms milliseconds for other writes, before
 # performing the sync.
 #
-commitlog_sync: batch
-commitlog_sync_batch_window_in_ms: 2
+# commitlog_sync: batch
+# commitlog_sync_batch_window_in_ms: 50
 #
 # the other option is "periodic" where writes may be acked immediately
 # and the CommitLog is simply synced every commitlog_sync_period_in_ms
@@ -241,8 +271,8 @@ commitlog_sync_batch_window_in_ms: 2
 # entries on the commitlog queue.  If you are writing very large blobs,
 # you should reduce that; 16*cores works reasonably well for 1MB blobs.
 # It should be at least as large as the concurrent_writes setting.
-#commitlog_sync: periodic
-#commitlog_sync_period_in_ms: 10000
+commitlog_sync: periodic
+commitlog_sync_period_in_ms: 10000
 # commitlog_periodic_queue_size:
 
 # The size of the individual commitlog file segments.  A commitlog
@@ -288,7 +318,7 @@ concurrent_writes: 64
 # Total memory to use for memtables.  Cassandra will flush the largest
 # memtable when this much memory is used.
 # If omitted, Cassandra will set it to 1/4 of the heap.
-#memtable_total_space_in_mb: 32000
+# memtable_total_space_in_mb: 2048
 
 # Total space to use for commitlogs.  Since commitlog segments are
 # mmapped, and hence use up address space, the default size is 32
@@ -298,7 +328,7 @@ concurrent_writes: 64
 # segment multiple), Cassandra will flush every dirty CF in the oldest
 # segment and remove it.  So a small total commitlog space will tend
 # to cause more flush activity on less-active columnfamilies.
-#commitlog_total_space_in_mb: 8192
+# commitlog_total_space_in_mb: 4096
 
 # This sets the amount of memtable flush writer threads.  These will
 # be blocked by disk io, and each one will hold a memtable in memory
@@ -355,7 +385,7 @@ listen_address: localhost
 start_native_transport: true
 # port for the CQL native transport to listen for clients on
 # For security reasons, you should not expose this port to the internet.  Firewall it if needed.
-native_transport_port: 13042
+native_transport_port: 9042
 # The maximum threads for handling requests when the native transport is used.
 # This is similar to rpc_max_threads though the default differs slightly (and
 # there is no native_transport_min_threads, idle threads will always be stopped

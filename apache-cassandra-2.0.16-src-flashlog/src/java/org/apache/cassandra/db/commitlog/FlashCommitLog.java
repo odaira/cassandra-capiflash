@@ -35,6 +35,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.RowMutation;
@@ -44,6 +45,7 @@ import org.apache.cassandra.db.commitlog.capi.BufferAllocationStrategy;
 import org.apache.cassandra.db.commitlog.capi.CheckSummedBuffer;
 import org.apache.cassandra.db.commitlog.capi.ChunkManagerInterface;
 import org.apache.cassandra.db.commitlog.capi.FixedSizeAllocationStrategy;
+import org.apache.cassandra.db.commitlog.capi.PooledAllocationStrategy;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.FBUtilities;
 import org.slf4j.Logger;
@@ -62,10 +64,9 @@ import com.ibm.research.capiblock.Chunk;
 public class FlashCommitLog implements ICommitLog {
 	// TUNABLES
 
-	static int BLOCK_SIZE = 4096;
+	public static int BLOCK_SIZE = 4096;
 	static long START_OFFSET = DatabaseDescriptor.getFlashCommitLogStartOffset();
 	static String[] DEVICES = DatabaseDescriptor.getFlashCommitLogDevices();
-	static int bufferSizeinMB = DatabaseDescriptor.getFlashCommitLogThreadBufferSizeinMB();
 	static long DATA_OFFSET = START_OFFSET + FlashSegmentManager.MAX_SEGMENTS;
 	static final Logger logger = LoggerFactory.getLogger(FlashCommitLog.class);
 	public static final FlashCommitLog instance = new FlashCommitLog();
@@ -77,9 +78,12 @@ public class FlashCommitLog implements ICommitLog {
 	protected FlashCommitLog() {
 		try {
 			fsm = new FlashSegmentManager(CapiBlockDevice.getInstance().openChunk(DEVICES[0]));
-			//chunkManager = new AsyncChunkManager();// TODO asyncrequests
-			chunkManager = new AsyncProducerConsumerChunkManager();
-			bufferAlloc = new FixedSizeAllocationStrategy(); //TODO parameterize
+			chunkManager = DatabaseDescriptor.getFlashCommitLogChunkManager() == Config.FlashCommitlogChunkManagerType.AsyncChunkManager
+					? new AsyncChunkManager() : new AsyncProducerConsumerChunkManager();
+					
+			bufferAlloc = DatabaseDescriptor.getFlashCommitLogBufferAllocationStrategy() == Config.FlashCommitlogBufferAllocationStrategyType.PooledAllocationStrategy
+					? new PooledAllocationStrategy() : new FixedSizeAllocationStrategy(); 
+					
 			if (DatabaseDescriptor.isCommitlogDebugEnabled()) {
 				new Thread(new Runnable() {
 					@Override
@@ -124,8 +128,9 @@ public class FlashCommitLog implements ICommitLog {
 
 		long totalSize = RowMutation.serializer.serializedSize(rm, MessagingService.current_version) + 28;
 		long requiredBlocks = getBlockCount(totalSize);
-		if (requiredBlocks > DatabaseDescriptor.getFlashCommitLogSegmentSizeInBlocks()
-				|| requiredBlocks > DatabaseDescriptor.getFlashCommitLogThreadBufferSizeinMB() * (256)) {
+		//TODO FIXIT
+		if (requiredBlocks > DatabaseDescriptor.getFlashCommitLogSegmentSizeInBlocks()){
+				//|| requiredBlocks > DatabaseDescriptor.getFlashCommitLogThreadBufferSizeinMB() * (256)) {
 			logger.warn("Skipping commitlog append of extremely large mutation Blocks: {}", requiredBlocks);
 			return;
 		}

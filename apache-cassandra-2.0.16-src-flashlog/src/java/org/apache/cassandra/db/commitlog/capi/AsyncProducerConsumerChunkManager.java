@@ -24,17 +24,16 @@ public class AsyncProducerConsumerChunkManager implements ChunkManagerInterface 
 	final CapiBlockDevice dev = CapiBlockDevice.getInstance();
 	final Chunk chunks[];
 	final AtomicInteger nextChunk = new AtomicInteger(0);
-	int maxThreads =10;
 
 	BlockingQueue<Runnable> queue = new ArrayBlockingQueue<Runnable>(
-			DatabaseDescriptor.getFlashCommitLogNumberOfThreads());
-	final ExecutorService service = new ThreadPoolExecutor(1, maxThreads, 1, TimeUnit.MILLISECONDS,
-			new ArrayBlockingQueue<Runnable>(DatabaseDescriptor.getFlashCommitLogNumberOfThreads()));
+			DatabaseDescriptor.getFlashCommitlogNumberOfAsyncWrite());
+	final ExecutorService service = new ThreadPoolExecutor(1, DatabaseDescriptor.getFlashCommitlogMaxNumberOfConsumers(), 1, TimeUnit.MILLISECONDS,
+			new ArrayBlockingQueue<Runnable>(DatabaseDescriptor.getFlashCommitlogNumberOfAsyncWrite()));
 
 	public AsyncProducerConsumerChunkManager(int num_async) {
-		chunks = new Chunk[DatabaseDescriptor.getFlashCommitLogNumberOfThreads()];// FIXME//TODO
+		chunks = new Chunk[DatabaseDescriptor.getFlashCommitLogNumberOfChunks()];
 		openChunks(num_async);
-		for (int i = 0; i < DatabaseDescriptor.getFlashCommitLogNumberOfThreads(); i++) {
+		for (int i = 0; i < DatabaseDescriptor.getFlashCommitlogNumberOfAsyncWrite(); i++) {
 			try {
 				queue.put(new Task());
 			} catch (InterruptedException e) {
@@ -45,7 +44,7 @@ public class AsyncProducerConsumerChunkManager implements ChunkManagerInterface 
 	}
 
 	public AsyncProducerConsumerChunkManager() {
-		this(0);
+		this(DatabaseDescriptor.getFlashCommitLogNumberOfAsyncCallsPerChunk());
 	}
 
 	@Override
@@ -67,20 +66,16 @@ public class AsyncProducerConsumerChunkManager implements ChunkManagerInterface 
 	}
 
 	@Override
-	public void write(long l, long m, CheckSummedBuffer buf) {
+	public void write(long startOffset, long num_blocks, CheckSummedBuffer buf) {
 		Chunk cur = getNextChunk();
 		try {
 			Task t = (Task) queue.take();
-			t.future = cur.writeBlockAsync(l, m, buf.getBuffer());
+			t.future = cur.writeBlockAsync(startOffset, num_blocks, buf.getBuffer());
 			service.submit(t).get();
 			queue.put(t);
-		} catch (IOException e) {
+		} catch (IOException | InterruptedException | ExecutionException e ) {
 			e.printStackTrace();
-		} catch (InterruptedException e) {
-			e.printStackTrace();
-		} catch (ExecutionException e) {
-			e.printStackTrace();
-		}
+		} 
 	}
 
 	@Override

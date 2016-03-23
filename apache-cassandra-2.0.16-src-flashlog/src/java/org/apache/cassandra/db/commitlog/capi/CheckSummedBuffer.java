@@ -5,6 +5,7 @@ import java.nio.ByteBuffer;
 import java.util.zip.Checksum;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.commitlog.FlashCommitLog;
 import org.apache.cassandra.io.util.ByteBufferOutputStream;
 import org.apache.cassandra.io.util.ChecksummedOutputStream;
 import org.apache.cassandra.utils.PureJavaCrc32;
@@ -17,7 +18,7 @@ public class CheckSummedBuffer {
 	private final DataOutputStream bufferStream;
 	private final Checksum checksum = new PureJavaCrc32();
 	public CheckSummedBuffer(){
-		buffer = ByteBuffer.allocateDirect(DatabaseDescriptor.getFlashCommitLogThreadBufferSizeinMB() * 1024 * 1024);
+		buffer = ByteBuffer.allocateDirect(DatabaseDescriptor.getFlashCommitLogBufferSizeInBlocks() * FlashCommitLog.BLOCK_SIZE);
 		bufferStream = new DataOutputStream(new ChecksummedOutputStream(
 				new ByteBufferOutputStream(buffer), checksum));
 	}

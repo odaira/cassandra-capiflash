@@ -21,12 +21,12 @@ public class AsyncChunkManager implements ChunkManagerInterface {
 	final AtomicInteger nextChunk = new AtomicInteger(0);
 
 	public AsyncChunkManager(int num_async) {
-		chunks = new Chunk[DatabaseDescriptor.getFlashCommitLogNumberOfThreads()];// FIXME//TODO
+		chunks = new Chunk[DatabaseDescriptor.getFlashCommitLogNumberOfChunks()];
 		openChunks(num_async);
 	}
 
 	public AsyncChunkManager() {
-		this(0);
+		this(DatabaseDescriptor.getFlashCommitLogNumberOfAsyncCallsPerChunk());
 	}
 
 	@Override
@@ -48,20 +48,15 @@ public class AsyncChunkManager implements ChunkManagerInterface {
 	}
 
 	@Override
-	public void write(long l, long m, CheckSummedBuffer buf) {
+	public void write(long startOffset, long num_blocks, CheckSummedBuffer buf) {
 		Chunk cur = getNextChunk();
 		Future<Long> future;
 		try {
-			future = cur.writeBlockAsync(l,m,buf.getBuffer());
+			future = cur.writeBlockAsync(startOffset,num_blocks,buf.getBuffer());
 			future.get();
-			//TODO fixit
-		} catch (IOException e) {
+		} catch (IOException | InterruptedException | ExecutionException e ) {
 			e.printStackTrace();
-		} catch (InterruptedException e) {
-			e.printStackTrace();
-		} catch (ExecutionException e) {
-			e.printStackTrace();
-		}
+		} 
 	}
 
 	@Override

@@ -185,8 +185,7 @@ public class DatabaseDescriptor {
 			if (conf.capiflashlog_devices == null || conf.capiflashlog_devices == null
 					|| conf.capiflashlog_number_of_segments < 32
 					|| conf.capiflashlog_segments_size_in_blocks < 16000
-					|| conf.capiflashlog_start_offset < 0
-					|| conf.capiflashlog_threads <= 0) {
+					|| conf.capiflashlog_start_offset < 0) {
 				throw new ConfigurationException(
 						"Please check all needed FlashLog Parameters");
 			}
@@ -1001,19 +1000,14 @@ public class DatabaseDescriptor {
 		return conf.capiflashlog_number_of_segments;
 	}
 
-	public static int getFlashCommitLogNumberOfThreads() {
-		return conf.capiflashlog_threads;
-	}
-
 	public static long getFlashCommitLogStartOffset() {
 		return conf.capiflashlog_start_offset;
 	}
-
-
+	/*
 	public static int getFlashCommitLogThreadBufferSizeinMB() {
 		return conf.capiflashlog_threads_buffer_size_in_mb;
 	}
-	
+	*/
 	public static Config.CommitLogType getCommitLogType() {
 		return conf.commitlog_type;
 	}
@@ -1431,5 +1425,36 @@ public class DatabaseDescriptor {
 
 	public static long getFlashCommitLogFlushCheckInterval() {
 		return conf.capiflashlog_refresh_interval_in_seconds*1000;
+	}
+
+	public static Config.FlashCommitlogChunkManagerType getFlashCommitLogChunkManager() {
+		return conf.capiflashlog_chunkmanager_type;
+	}
+
+	public static Config.FlashCommitlogBufferAllocationStrategyType getFlashCommitLogBufferAllocationStrategy() {
+		return conf.capiflashlog_buffer_allocator_type;
+	}
+
+	public static int getFlashCommitLogNumberOfChunks() {
+		return conf.capiflashlog_number_of_chunks;
+	}
+	public static int getFlashCommitLogNumberOfAsyncCallsPerChunk() {
+		return conf.capiflashlog_async_calls_per_chunk;
+	}
+
+	public static int getFlashCommitlogNumberOfBuffers() {
+		return conf.capiflashlog_preallocated_buffer_count;
+	}
+
+	public static int getFlashCommitLogBufferSizeInBlocks() {
+		return conf.capiflashlog_preallocated_buffer_size_in_blocks;
+	}
+
+	public static int getFlashCommitlogNumberOfAsyncWrite() {
+		return conf.capiflashlog_number_of_concurrent_writeBlock;
+	}
+	
+	public static int getFlashCommitlogMaxNumberOfConsumers() {
+		return conf.capiflashlog_number_of_concurrent_writeBlock;
 	}
 }
