@@ -247,7 +247,7 @@ public class FlashCommitLog implements ICommitLog {
 	}
 
 	public long getPendingTasks() {
-		return 0;// TODO
+		return 0;//TODO
 	}
 
 	public boolean isEmpty() {

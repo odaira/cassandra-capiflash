@@ -21,6 +21,7 @@ public class AsyncChunkManager implements ChunkManagerInterface {
 	final AtomicInteger nextChunk = new AtomicInteger(0);
 
 	public AsyncChunkManager(int num_async) {
+		logger.debug("[AsyncChunkManager - Devices =  "+DEVICES.length+","+num_async+"]");
 		chunks = new Chunk[DatabaseDescriptor.getFlashCommitLogNumberOfChunks()];
 		openChunks(num_async);
 	}

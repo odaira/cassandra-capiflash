@@ -3,8 +3,11 @@ package org.apache.cassandra.db.commitlog.capi;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class FixedSizeAllocationStrategy implements BufferAllocationStrategy{
+	static final Logger logger = LoggerFactory.getLogger(FixedSizeAllocationStrategy.class);
 	ConcurrentLinkedQueue<CheckSummedBuffer> buffers = new ConcurrentLinkedQueue<CheckSummedBuffer>();
 	public FixedSizeAllocationStrategy(){
 		for(int i = 0; i < DatabaseDescriptor.getFlashCommitlogNumberOfBuffers(); i++){

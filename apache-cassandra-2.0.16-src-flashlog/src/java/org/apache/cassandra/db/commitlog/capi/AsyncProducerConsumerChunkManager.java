@@ -19,7 +19,7 @@ import com.ibm.research.capiblock.CapiBlockDevice;
 import com.ibm.research.capiblock.Chunk;
 
 public class AsyncProducerConsumerChunkManager implements ChunkManagerInterface {
-	static final Logger logger = LoggerFactory.getLogger(FlashCommitLog.class);
+	static final Logger logger = LoggerFactory.getLogger(AsyncProducerConsumerChunkManager.class);
 	static String[] DEVICES = DatabaseDescriptor.getFlashCommitLogDevices();
 	final CapiBlockDevice dev = CapiBlockDevice.getInstance();
 	final Chunk chunks[];
@@ -27,10 +27,15 @@ public class AsyncProducerConsumerChunkManager implements ChunkManagerInterface 
 
 	BlockingQueue<Runnable> queue = new ArrayBlockingQueue<Runnable>(
 			DatabaseDescriptor.getFlashCommitlogNumberOfAsyncWrite());
-	final ExecutorService service = new ThreadPoolExecutor(1, DatabaseDescriptor.getFlashCommitlogMaxNumberOfConsumers(), 1, TimeUnit.MILLISECONDS,
+	final ExecutorService service = new ThreadPoolExecutor(1,
+			DatabaseDescriptor.getFlashCommitlogMaxNumberOfConsumers(), 1, TimeUnit.MILLISECONDS,
 			new ArrayBlockingQueue<Runnable>(DatabaseDescriptor.getFlashCommitlogNumberOfAsyncWrite()));
 
 	public AsyncProducerConsumerChunkManager(int num_async) {
+		logger.debug("[AsyncProducerConsumerChunkManager - Devices =  " + DEVICES.length + "," + num_async + "]");
+		logger.debug("[AsyncProducerConsumerChunkManager - Concurrent Chunk Writers =  "
+				+ DatabaseDescriptor.getFlashCommitlogNumberOfAsyncWrite() + "- Consumers="
+				+ DatabaseDescriptor.getFlashCommitlogMaxNumberOfConsumers() + "]");
 		chunks = new Chunk[DatabaseDescriptor.getFlashCommitLogNumberOfChunks()];
 		openChunks(num_async);
 		for (int i = 0; i < DatabaseDescriptor.getFlashCommitlogNumberOfAsyncWrite(); i++) {
@@ -73,9 +78,9 @@ public class AsyncProducerConsumerChunkManager implements ChunkManagerInterface 
 			t.future = cur.writeBlockAsync(startOffset, num_blocks, buf.getBuffer());
 			service.submit(t).get();
 			queue.put(t);
-		} catch (IOException | InterruptedException | ExecutionException e ) {
+		} catch (IOException | InterruptedException | ExecutionException e) {
 			e.printStackTrace();
-		} 
+		}
 	}
 
 	@Override
