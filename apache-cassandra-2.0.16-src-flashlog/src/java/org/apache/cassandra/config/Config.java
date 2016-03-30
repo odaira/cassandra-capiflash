@@ -168,7 +168,7 @@ public class Config
     public int capiflashlog_async_calls_per_chunk = 0;
     
     /*
-     *	AsyncChunkManager - 
+     *	AsyncChunkManager 
      */
    
     /*
@@ -316,7 +316,8 @@ public class Config
     public static enum FlashCommitlogChunkManagerType
     {
     	AsyncChunkManager,
-    	AsyncProducerConsumerChunkManager
+    	AsyncProducerConsumerChunkManager,
+    	AsyncSemaphoreChunkManager
     }
     
     public static enum FlashCommitlogBufferAllocationStrategyType

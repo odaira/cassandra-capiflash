@@ -34,7 +34,6 @@ import java.util.zip.Checksum;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.Schema;
-import org.apache.cassandra.db.Column;
 import org.apache.cassandra.db.ColumnFamily;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ColumnSerializer;
@@ -42,13 +41,11 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.RowMutation;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.io.util.FastByteArrayInputStream;
-import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.PureJavaCrc32;
 import org.apache.cassandra.utils.WrappedRunnable;
 import org.cliffc.high_scale_lib.NonBlockingHashSet;
-import org.mortbay.log.Log;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -62,11 +59,7 @@ import com.ibm.research.capiblock.Chunk;
 public class FlashBulkReplayer {
 	private static int BULK_BLOCKS_TO_READ = 8000;// 32 MB pieces
 	static final Logger logger = LoggerFactory.getLogger(FlashBulkReplayer.class);
-	private static final int MAX_OUTSTANDING_REPLAY_COUNT = 1024; // this
-																			// is
-																			// 1024
-																			// by
-
+	private static final int MAX_OUTSTANDING_REPLAY_COUNT = 2*1024*1024; 
 	private final Set<Keyspace> keyspacesRecovered;
 	private final List<Future<?>> futures;
 	private final Map<UUID, AtomicInteger> invalidMutations;
@@ -77,11 +70,13 @@ public class FlashBulkReplayer {
 	private ByteBuffer buffer;
 	private ByteBuffer readerBuffer;
 	private HashMap<String, Integer> debugRecovery = new HashMap<String, Integer>();
+	private long total_read=0;
+	private long total_deser=0;
 
 	public FlashBulkReplayer() {
 		this.keyspacesRecovered = new NonBlockingHashSet<Keyspace>();
 		this.futures = new ArrayList<Future<?>>();
-		buffer = ByteBuffer.allocateDirect(FlashSegmentManager.BLOCKS_IN_SEG * 4096);
+		buffer = ByteBuffer.allocate(FlashSegmentManager.BLOCKS_IN_SEG * 4096);
 		this.invalidMutations = new HashMap<UUID, AtomicInteger>();
 		this.replayedCount = new AtomicInteger();
 		this.checksum = new PureJavaCrc32();
@@ -113,7 +108,7 @@ public class FlashBulkReplayer {
 		readerBuffer = ByteBuffer.allocateDirect((int) (BULK_BLOCKS_TO_READ * 1024 * 4));
 	}
 
-	public void recover(FlashSegmentManager fsm) throws IOException {
+	public void recover(FlashSegmentManager fsm) throws IOException {		
 		for (Integer key : fsm.unCommitted.keySet()) {
 			buffer.clear();
 			final long segmentId = fsm.unCommitted.get(key);
@@ -138,6 +133,7 @@ public class FlashBulkReplayer {
 			long start = (FlashCommitLog.DATA_OFFSET + key * FlashSegmentManager.BLOCKS_IN_SEG) + replayPosition;
 			long blocks = 0;
 			// TODO read 128 mb
+			long read_timer = System.currentTimeMillis();
 			while (blocks != FlashSegmentManager.BLOCKS_IN_SEG) {
 				readerBuffer.clear();
 				logger.debug("Reading " + start + " end:" + blocks);
@@ -146,9 +142,11 @@ public class FlashBulkReplayer {
 				blocks += BULK_BLOCKS_TO_READ;
 				buffer.put(readerBuffer);
 			}
+			total_read += (System.currentTimeMillis() - read_timer);
 			buffer.rewind();
 			buffer.position(replayPosition);
 			logger.debug(buffer.toString());
+			long deser_timer = System.currentTimeMillis();
 			while (buffer.remaining() != 0) {
 				checksum.reset();
 				int mark = buffer.position();
@@ -164,26 +162,17 @@ public class FlashBulkReplayer {
 					logger.debug("Error!! Serialized Size is:" + serializedSize);
 					break;
 				}
-				// TODO populate chsum from recordSegmentId and serializedSize
-				// TODO FBUtilities have integer shifting for checksum instead
-				// of reading 12 bytes try doing this manually
-				buffer.position(mark);// roll it back and read again for chsum
-				byte[] chsum = new byte[12];
-				buffer.get(chsum);
-				checksum.update(chsum, 0, 12);
-
+				checksum.update(buffer.array(), mark, 12);
+				buffer.position(mark + 12);
 				long claimedSizeChecksum = buffer.getLong();
 				if (checksum.getValue() != claimedSizeChecksum) {
 					logger.debug("Error!! First Checksum Doesnot Match !! " + " Re ad:" + claimedSizeChecksum);
 					break;
 				}
-
 				int blocksToRead = (int) (FlashCommitLog.getBlockCount(serializedSize));
-
-				byte[] data = new byte[(serializedSize - 28)];
-				buffer.get(data);
+				buffer.position(buffer.position() + serializedSize - 28);
 				claimedCRC32 = buffer.getLong();
-				checksum.update(data, 0, serializedSize - 28);
+				checksum.update(buffer.array(), mark + 20, serializedSize - 28);
 
 				if (claimedCRC32 != checksum.getValue()) {
 					logger.debug(
@@ -194,23 +183,19 @@ public class FlashBulkReplayer {
 
 				buffer.position(mark + (blocksToRead * 4096));
 				// now we are sure that our data is safe
-				FastByteArrayInputStream bufIn = new FastByteArrayInputStream(data, 0, serializedSize - 28);
+				FastByteArrayInputStream bufIn = new FastByteArrayInputStream(buffer.array(), mark + 20,
+						serializedSize - 28);
 				final RowMutation rm;
 				rm = RowMutation.serializer.deserialize(new DataInputStream(bufIn), MessagingService.current_version,
 						ColumnSerializer.Flag.LOCAL);
-				for (ColumnFamily cf : rm.getColumnFamilies()) {
-					for (Column cell : cf) {
-						cf.getComparator().validate(cell.name());
-						if (!debugRecovery.containsKey(cell.name().toString())) {
-							debugRecovery.put(cell.name().toString(), 1);
-						}
-						else{
-							int val = debugRecovery.get(cell.name().toString())+1;
-							debugRecovery.put(cell.name().toString(), val);
-						}
-					}
-				}
-
+				/*
+				 * for (ColumnFamily cf : rm.getColumnFamilies()) { for (Column
+				 * cell : cf) { cf.getComparator().validate(cell.name()); if
+				 * (!debugRecovery.containsKey(cell.name().toString())) {
+				 * debugRecovery.put(cell.name().toString(), 1); } else{ int val
+				 * = debugRecovery.get(cell.name().toString())+1;
+				 * debugRecovery.put(cell.name().toString(), val); } } }
+				 */
 				// check and compare with current replayposition
 				final long entryLocation = buffer.position() / 4096;
 
@@ -244,15 +229,14 @@ public class FlashBulkReplayer {
 						}
 					}
 				};
-				// logger.debug("Finished reading: " + key);
 				futures.add(StageManager.getStage(Stage.MUTATION).submit(runnable));
 				if (futures.size() > MAX_OUTSTANDING_REPLAY_COUNT) {
 					FBUtilities.waitOnFutures(futures);
 					futures.clear();
 				}
 			}
+			total_deser += (System.currentTimeMillis() - deser_timer);
 		}
-
 	}
 
 	public int blockForWrites() {
@@ -262,6 +246,7 @@ public class FlashBulkReplayer {
 		}
 		// wait for all the writes to finish on the mutation stage
 		FBUtilities.waitOnFutures(futures);
+		logger.debug("Deserialization:"+total_deser + " Reading:"+total_read);
 		logger.debug("Finished waiting on mutations from recovery");
 		// flush replayed keyspaces
 		futures.clear();
@@ -269,8 +254,8 @@ public class FlashBulkReplayer {
 			futures.addAll(keyspace.flush());
 		}
 		FBUtilities.waitOnFutures(futures);
-		for(String key : debugRecovery.keySet()){
-			logger.debug("Recovered key:"+key+" value:"+debugRecovery.get(key));
+		for (String key : debugRecovery.keySet()) {
+			logger.debug("Recovered key:" + key + " value:" + debugRecovery.get(key));
 		}
 		return replayedCount.get();
 	}
