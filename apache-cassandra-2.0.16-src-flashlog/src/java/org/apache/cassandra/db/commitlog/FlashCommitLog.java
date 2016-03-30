@@ -36,11 +36,13 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.cassandra.config.Config;
+import org.apache.cassandra.config.Config.FlashCommitlogChunkManagerType;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.RowMutation;
 import org.apache.cassandra.db.commitlog.capi.AsyncChunkManager;
 import org.apache.cassandra.db.commitlog.capi.AsyncProducerConsumerChunkManager;
+import org.apache.cassandra.db.commitlog.capi.AsyncSemaphoreChunkManager;
 import org.apache.cassandra.db.commitlog.capi.BufferAllocationStrategy;
 import org.apache.cassandra.db.commitlog.capi.CheckSummedBuffer;
 import org.apache.cassandra.db.commitlog.capi.ChunkManagerInterface;
@@ -78,8 +80,15 @@ public class FlashCommitLog implements ICommitLog {
 	protected FlashCommitLog() {
 		try {
 			fsm = new FlashSegmentManager(CapiBlockDevice.getInstance().openChunk(DEVICES[0]));
-			chunkManager = DatabaseDescriptor.getFlashCommitLogChunkManager() == Config.FlashCommitlogChunkManagerType.AsyncChunkManager
-					? new AsyncChunkManager() : new AsyncProducerConsumerChunkManager();
+			
+			FlashCommitlogChunkManagerType cmType = DatabaseDescriptor.getFlashCommitLogChunkManager();
+			if(cmType == Config.FlashCommitlogChunkManagerType.AsyncProducerConsumerChunkManager){
+				chunkManager = new AsyncProducerConsumerChunkManager();
+			}else if(cmType == Config.FlashCommitlogChunkManagerType.AsyncSemaphoreChunkManager){
+				chunkManager = new AsyncSemaphoreChunkManager();
+			}else{
+				chunkManager = new AsyncChunkManager();
+			}
 					
 			bufferAlloc = DatabaseDescriptor.getFlashCommitLogBufferAllocationStrategy() == Config.FlashCommitlogBufferAllocationStrategyType.PooledAllocationStrategy
 					? new PooledAllocationStrategy() : new FixedSizeAllocationStrategy(); 
