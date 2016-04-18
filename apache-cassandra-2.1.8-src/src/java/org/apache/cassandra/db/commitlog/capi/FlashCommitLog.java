@@ -113,7 +113,7 @@ public class FlashCommitLog implements ICommitLog {
 			buf.getStream().writeInt((int) totalSize);
 			buf.getBuffer().putLong(buf.calculate(0, 12).getValue());
 			Mutation.serializer.serialize(rm, buf.getStream(), MessagingService.current_version);
-			buf.getBuffer().putLong(buf.calculate(20, (int)totalSize).getValue());
+			buf.getBuffer().putLong(buf.calculate(20, ((int)totalSize)-28).getValue());
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
