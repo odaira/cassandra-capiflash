@@ -15,7 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.db.commitlog;
+package org.apache.cassandra.db.commitlog.capi;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -43,13 +43,12 @@ import java.util.concurrent.locks.ReentrantLock;
 
 import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
-import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.Memtable;
 import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.commitlog.ReplayPosition;
 import org.apache.cassandra.metrics.DefaultNameFactory;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.WaitQueue;
@@ -58,6 +57,7 @@ import org.slf4j.LoggerFactory;
 
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
+import com.ibm.research.capiblock.CapiBlockDevice;
 import com.ibm.research.capiblock.Chunk;
 import com.yammer.metrics.Metrics;
 
@@ -92,7 +92,7 @@ public class FlashSegmentManager {
 			ByteBuffer recoverMe = ByteBuffer.allocateDirect(1024 * 4 * MAX_SEGMENTS);
 			bookkeeper.readBlock(FlashCommitLog.START_OFFSET, MAX_SEGMENTS, recoverMe);
 			for (int i = 0; i < MAX_SEGMENTS; i++) {
-				recoverMe.position(i * FlashCommitLog.BLOCK_SIZE);
+				recoverMe.position(i * CapiBlockDevice.BLOCK_SIZE);
 				long segID = recoverMe.getLong();
 				if (segID != 0) {// Committed Segments will be 0 unCommitted
 									// Segments will contain the unique id
@@ -207,7 +207,7 @@ public class FlashSegmentManager {
 		return Collections.unmodifiableCollection(activeSegments);
 	}
 
-	FlashRecordKeeper allocate(long num_blocks, Mutation rm) {
+	FlashRecordAdder allocate(int num_blocks, Mutation rm) {
 		allocationLock.lock();
 		if (active == null || !active.hasCapacityFor(num_blocks)) {
 			while (freelist.isEmpty()) {
@@ -219,7 +219,7 @@ public class FlashSegmentManager {
 			activateNextSegment();
 		}
 		active.markDirty(rm, active.getContext());
-		final FlashRecordKeeper offset = new FlashRecordKeeper(num_blocks, active.getandAddPosition(num_blocks),
+		final FlashRecordAdder offset = new FlashRecordAdder(num_blocks, active.getandAddPosition(num_blocks),
 				active.getID());
 		allocationLock.unlock();
 		return offset;

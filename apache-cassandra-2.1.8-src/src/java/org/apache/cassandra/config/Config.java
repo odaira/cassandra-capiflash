@@ -25,7 +25,8 @@ import java.util.Set;
 import com.google.common.collect.Sets;
 import org.supercsv.io.CsvListReader;
 import org.supercsv.prefs.CsvPreference;
-
+import org.apache.cassandra.config.Config.FlashCommitlogBufferAllocationStrategyType;
+import org.apache.cassandra.config.Config.FlashCommitlogChunkManagerType;
 import org.apache.cassandra.config.EncryptionOptions.ClientEncryptionOptions;
 import org.apache.cassandra.config.EncryptionOptions.ServerEncryptionOptions;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -169,14 +170,34 @@ public class Config
     //CAPI Flash CommitLog
     public long capiflashlog_start_offset;
     public String[] capiflashlog_devices;
-    public int capiflashlog_threads;
     public int capiflashlog_number_of_segments;
     public int capiflashlog_segments_size_in_blocks;
-    public int capiflashlog_threads_buffer_size_in_mb;
     public boolean capiflashlog_debug_enabled = false;
     public double capiflashlog_flush_threshold = 0.2;
-    public int capiflashlog_refresh_interval_in_seconds=2;
+    public int capiflashlog_refresh_interval_in_seconds = 2;
+    
+    public FlashCommitlogChunkManagerType capiflashlog_chunkmanager_type;
+    public FlashCommitlogBufferAllocationStrategyType capiflashlog_buffer_allocator_type;
+    
+    //CAPI Flash CommitLog - Configurables for ChunkManager
+    public int capiflashlog_number_of_chunks = 128;
+    public int capiflashlog_async_calls_per_chunk = 0;
 
+    //CAPI Flash CommitLog - AsyncProducerConsumerChunk Manager 
+    public int capiflashlog_number_of_concurrent_writeBlock = 128;
+    public int capiflashlog_numberof_consumer_threads = 32;
+    
+    //CAPI Flash CommitLog - Configurables for Buffer Allocator
+    /**
+     * Fixed Size Allocation Strategy -  number of preallocated buffers/size of the buffers(in blocks)
+     * */
+    public int capiflashlog_preallocated_buffer_size_in_blocks = 256;
+    public int capiflashlog_preallocated_buffer_count = 128;
+
+    /**
+     * PooledAllocationStrategy -  number of preallocated buffers/size of the buffers(in blocks)
+     * */
+    
     
     @Deprecated
     public int commitlog_periodic_queue_size = -1;
@@ -323,6 +344,20 @@ public class Config
         periodic,
         batch
     }
+    
+    public static enum FlashCommitlogChunkManagerType
+    {
+    	AsyncChunkManager,
+    	AsyncProducerConsumerChunkManager,
+    	AsyncSemaphoreChunkManager
+    }
+    
+    public static enum FlashCommitlogBufferAllocationStrategyType
+    {
+    	PooledAllocationStrategy,
+    	FixedSizeAllocationStrategy
+    }
+    
     public static enum InternodeCompression
     {
         all, none, dc

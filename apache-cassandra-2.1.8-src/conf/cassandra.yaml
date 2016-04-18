@@ -237,17 +237,11 @@ capiflashlog_devices:
 #Start offset on physical LUN
 capiflashlog_start_offset: 0
 
-#Number of worker threads serializing and making synchronous calls to capi device
-capiflashlog_threads: 128
-
 #number of logical segments
 capiflashlog_number_of_segments: 256
 
 #records for each segment
 capiflashlog_segments_size_in_blocks: 64000
-
-#size of the buffer allocated in each worker thread. this also checks max request size
-capiflashlog_threads_buffer_size_in_mb: 1
 
 #if size of freelist goes below this value initiates flush
 capiflashlog_flush_threshold: 0.3
@@ -257,6 +251,38 @@ capiflashlog_refresh_interval_in_seconds: 2
 
 #Starts a back ground thread to collect commitlog metrics -  default false
 capiflashlog_debug_enabled: true
+
+#CapiFlashCommitlog - Buffer Allocation#
+#In-progress 
+#capiflashlog_buffer_allocator_type : PooledAllocationStrategy
+
+#Allocates fixed number of buffers with fixed size. 
+#if number of buffers not enough it will busy wait until resource become available
+capiflashlog_buffer_allocator_type : FixedSizeAllocationStrategy
+capiflashlog_preallocated_buffer_size_in_blocks : 256
+capiflashlog_preallocated_buffer_count : 128
+ 
+#CapiFlashCommitlog - Async Chunk Management#
+#number of chunks to be opened
+capiflashlog_number_of_chunks : 128
+
+#number of async call parameters to be passed to the openChunk method 
+#if set 0 capiflash layer decides on the parameter
+capiflashlog_async_calls_per_chunk : 0
+
+#no configurables for this type of chunk manager- each concurrent_writes thread calls writeblockasync and Future.get immediately.
+#capiflashlog_chunkmanager_type : AsyncChunkManager
+   
+#creates number of chunks defined by (capiflashlog_number_of_chunks)
+#implements controls over concurrent_writer threads  
+capiflashlog_chunkmanager_type : AsyncProducerConsumerChunkManager
+
+#number of concurrent_writes threads allowed to call writeBlockAsync 
+#also sets the size of the blockingqueue which backs the threadpool that consumes Future.get
+capiflashlog_number_of_concurrent_writeBlock : 128
+
+#max number of consumer threads to consume Future.get() of writeblockAsync calls.
+capiflashlog_numberof_consumer_threads : 32
 
 # commitlog_sync may be either "periodic" or "batch." 
 # 
