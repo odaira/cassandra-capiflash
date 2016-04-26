@@ -119,7 +119,7 @@ public class FlashCommitLog implements ICommitLog {
 		}
 		chunkManager.write(adder.getStartBlock(), adder.getRequiredBlocks(), buf);
 		bufferAlloc.free(buf);
-		return new ReplayPosition(adder.getSegmentID(), (int) (adder.getStartBlock() + adder.getRequiredBlocks()));
+		return new ReplayPosition(adder.getSegmentID(), adder.getOffset());
 	}
 
 	/**

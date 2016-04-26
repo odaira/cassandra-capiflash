@@ -220,7 +220,7 @@ public class FlashSegmentManager {
 		}
 		active.markDirty(rm, active.getContext());
 		final FlashRecordAdder offset = new FlashRecordAdder(num_blocks, active.getandAddPosition(num_blocks),
-				active.getID());
+				active.getID(),(int) active.currentBlocks.get());
 		allocationLock.unlock();
 		return offset;
 	}
