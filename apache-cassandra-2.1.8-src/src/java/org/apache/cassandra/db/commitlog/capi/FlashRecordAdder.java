@@ -26,11 +26,13 @@ public class FlashRecordAdder {
 	private long startBlock = 0;
 	private int requiredBlocks = 0;
 	private long segmentID = 0;
+	private int offset = 0;
 
-	public FlashRecordAdder(int num_blocks, long pos, long id) {
+	public FlashRecordAdder(int num_blocks, long pos, long id, int n_offset) {
 		requiredBlocks = num_blocks;
 		segmentID = id;
 		startBlock = pos;
+		offset = n_offset;
 	}
 
 	public long getStartBlock() {
@@ -44,5 +46,8 @@ public class FlashRecordAdder {
 	public long getSegmentID() {
 		return segmentID;
 	}
-
+	
+	public int getOffset(){
+		return offset;
+	}
 }
