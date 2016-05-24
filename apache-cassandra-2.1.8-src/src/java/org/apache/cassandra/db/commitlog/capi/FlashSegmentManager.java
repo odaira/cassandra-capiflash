@@ -209,18 +209,16 @@ public class FlashSegmentManager {
 
 	FlashRecordAdder allocate(int num_blocks, Mutation rm) {
 		allocationLock.lock();
+		if (freelist.isEmpty()) {
+			allocationLock.unlock();
+			return null;
+		}
 		if (active == null || !active.hasCapacityFor(num_blocks)) {
-			while (freelist.isEmpty()) {
-				hasAvailableSegments.register(Metrics
-						.newTimer(new DefaultNameFactory("CommitLog").createMetricName("WaitingOnSegmentAllocation"),
-								TimeUnit.MICROSECONDS, TimeUnit.SECONDS)
-						.time()).awaitUninterruptibly();
-			}
 			activateNextSegment();
 		}
 		active.markDirty(rm, active.getContext());
 		final FlashRecordAdder offset = new FlashRecordAdder(num_blocks, active.getandAddPosition(num_blocks),
-				active.getID(),(int) active.currentBlocks.get());
+				active.getID(), (int) active.currentBlocks.get());
 		allocationLock.unlock();
 		return offset;
 	}
