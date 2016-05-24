@@ -21,17 +21,21 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
+
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.Config.FlashCommitlogChunkManagerType;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.commitlog.ICommitLog;
 import org.apache.cassandra.db.commitlog.ReplayPosition;
+import org.apache.cassandra.metrics.DefaultNameFactory;
 import org.apache.cassandra.net.MessagingService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.ibm.research.capiblock.CapiBlockDevice;
+import com.yammer.metrics.Metrics;
 
 /**
  * @author bsendir 2,1
@@ -104,7 +108,11 @@ public class FlashCommitLog implements ICommitLog {
 					String.format("Mutation of %s blocks is too large for the maxiumum size of %s", totalSize,
 							DatabaseDescriptor.getFlashCommitLogSegmentSizeInBlocks()));
 		}
-		FlashRecordAdder adder = fsm.allocate(requiredBlocks, rm);
+		FlashRecordAdder adder = null;
+		adder = fsm.allocate(requiredBlocks, rm);
+		if (adder == null) {
+			return null;
+		}
 		CheckSummedBuffer buf = null;
 		buf = bufferAlloc.poll(requiredBlocks);
 		// fill the buffer
@@ -113,7 +121,7 @@ public class FlashCommitLog implements ICommitLog {
 			buf.getStream().writeInt((int) totalSize);
 			buf.getBuffer().putLong(buf.calculate(0, 12).getValue());
 			Mutation.serializer.serialize(rm, buf.getStream(), MessagingService.current_version);
-			buf.getBuffer().putLong(buf.calculate(20, ((int)totalSize)-28).getValue());
+			buf.getBuffer().putLong(buf.calculate(20, ((int) totalSize) - 28).getValue());
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
@@ -233,5 +241,13 @@ public class FlashCommitLog implements ICommitLog {
 
 	public void forceRecycleAllSegments(Iterable<UUID> droppedCfs) {
 		fsm.forceRecycleAll(droppedCfs);
+	}
+
+	@Override
+	public void await() {
+		fsm.hasAvailableSegments.register(
+				Metrics.newTimer(new DefaultNameFactory("CommitLog").createMetricName("WaitingOnSegmentAllocation"),
+						TimeUnit.MICROSECONDS, TimeUnit.SECONDS).time())
+				.awaitUninterruptibly();
 	}
 }

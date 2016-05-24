@@ -24,4 +24,6 @@ public interface ICommitLog {
 
 	void forceRecycleAllSegments(Iterable<UUID> droppedCfs);
 
+	void await();
+
 }

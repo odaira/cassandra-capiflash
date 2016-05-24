@@ -410,4 +410,9 @@ public class CommitLog implements CommitLogMBean, ICommitLog
         }
     }
 
+	@Override
+	public void await() {
+		// TODO Auto-generated method stub
+	}
+
 }
